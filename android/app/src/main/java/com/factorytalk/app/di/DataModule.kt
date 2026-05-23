@@ -60,9 +60,10 @@ object DataModule {
     fun provideUserRepository(
         firestoreDataSource: FirestoreDataSource,
         auth: FirebaseAuth,
-        deviceIdentityProvider: DeviceIdentityProvider
+        deviceIdentityProvider: DeviceIdentityProvider,
+        sharedPreferences: SharedPreferences
     ): UserRepository {
-        return UserRepositoryImpl(firestoreDataSource, auth, deviceIdentityProvider)
+        return UserRepositoryImpl(firestoreDataSource, auth, deviceIdentityProvider, sharedPreferences)
     }
 
     @Provides

@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
@@ -38,7 +39,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,7 +52,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,6 +93,10 @@ fun HomeScreen(
     val currentSpeaker by viewModel.currentSpeaker.collectAsState()
     val onlineUsers by viewModel.onlineUsers.collectAsState()
     val talkDuration by viewModel.talkDurationSeconds.collectAsState()
+    var showNameDialog by remember { mutableStateOf(false) }
+    var deviceNameInput by remember(currentUser?.displayName) {
+        mutableStateOf(currentUser?.displayName.orEmpty())
+    }
     val requiredPermissions = remember { PermissionHelper.requiredPermissions }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -148,11 +157,23 @@ fun HomeScreen(
         topBar = {
             Column {
                 TopAppBar(
-                    title = { Text("Factory Talk", fontWeight = FontWeight.Bold) },
+                    title = {
+                        Column {
+                            Text("Factory Talk", fontWeight = FontWeight.Bold)
+                            Text(
+                                text = currentUser?.displayName ?: "Factory Phone",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.background
                     ),
                     actions = {
+                        IconButton(onClick = { showNameDialog = true }) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit device name")
+                        }
                         if (currentUser?.role == UserRole.OWNER || currentUser?.role == UserRole.ADMIN) {
                             IconButton(onClick = onNavigateToAdmin) {
                                 Icon(Icons.Default.Settings, contentDescription = "Admin")
@@ -164,6 +185,40 @@ fun HomeScreen(
             }
         }
     ) { paddingValues ->
+        if (showNameDialog) {
+            AlertDialog(
+                onDismissRequest = { showNameDialog = false },
+                title = { Text("Device name") },
+                text = {
+                    OutlinedTextField(
+                        value = deviceNameInput,
+                        onValueChange = { deviceNameInput = it.take(24) },
+                        singleLine = true,
+                        label = { Text("Name shown to other phones") }
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.saveDeviceName(deviceNameInput)
+                            showNameDialog = false
+                            context.startService(Intent(context, TalkForegroundService::class.java).apply {
+                                action = Constants.ACTION_REFRESH_IDENTITY
+                            })
+                        },
+                        enabled = deviceNameInput.isNotBlank()
+                    ) {
+                        Text("Save")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showNameDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()

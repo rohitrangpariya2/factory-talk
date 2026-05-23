@@ -84,6 +84,11 @@ class TalkForegroundService : Service() {
             Constants.ACTION_STOP_SERVICE -> {
                 stopForegroundService()
             }
+            Constants.ACTION_REFRESH_IDENTITY -> {
+                signalingClient.disconnect()
+                initializeSignaling()
+                updateNotification("Connected - Listening")
+            }
             Constants.ACTION_INCOMING_BROADCAST -> {
                 // Woken up by FCM for incoming talk
                 val channelId = intent.getStringExtra(Constants.EXTRA_CHANNEL_ID)

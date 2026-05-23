@@ -28,6 +28,7 @@ object Constants {
     // Service Actions
     const val ACTION_START_SERVICE = "com.factorytalk.app.action.START_SERVICE"
     const val ACTION_STOP_SERVICE = "com.factorytalk.app.action.STOP_SERVICE"
+    const val ACTION_REFRESH_IDENTITY = "com.factorytalk.app.action.REFRESH_IDENTITY"
     const val ACTION_START_TALKING = "com.factorytalk.app.action.START_TALKING"
     const val ACTION_STOP_TALKING = "com.factorytalk.app.action.STOP_TALKING"
     const val ACTION_JOIN_CHANNEL = "com.factorytalk.app.action.JOIN_CHANNEL"

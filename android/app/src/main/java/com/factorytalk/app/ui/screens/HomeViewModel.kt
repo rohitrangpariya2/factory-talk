@@ -136,6 +136,15 @@ class HomeViewModel @Inject constructor(
             floorControlManager.releaseFloor(it)
         }
     }
+
+    fun saveDeviceName(name: String) {
+        val cleanedName = name.trim()
+        if (cleanedName.isBlank()) return
+
+        viewModelScope.launch {
+            userRepository.updateProfile(cleanedName)
+        }
+    }
     
     fun sendEmergencyBroadcast() {
         // TODO: Call API endpoint to trigger emergency push notification
