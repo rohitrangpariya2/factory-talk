@@ -17,23 +17,7 @@ object DemoData {
     )
 
     fun users(deviceId: String = Constants.DEMO_USER_ID, deviceName: String = Constants.DEMO_USER_NAME) = listOf(
-        currentUser(deviceId, deviceName),
-        User(
-            id = "demo-supervisor",
-            phoneNumber = "+910000000001",
-            displayName = "Demo Supervisor",
-            role = UserRole.SUPERVISOR,
-            isOnline = true,
-            channels = listOf(Constants.DEMO_CHANNEL_ID)
-        ),
-        User(
-            id = "demo-worker",
-            phoneNumber = "+910000000002",
-            displayName = "Demo Worker",
-            role = UserRole.WORKER,
-            isOnline = true,
-            channels = listOf(Constants.DEMO_CHANNEL_ID)
-        )
+        currentUser(deviceId, deviceName)
     )
 
     fun commonChannel(deviceId: String = Constants.DEMO_USER_ID, deviceName: String = Constants.DEMO_USER_NAME) = Channel(

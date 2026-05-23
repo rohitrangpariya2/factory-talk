@@ -127,7 +127,11 @@ class SignalingClient {
                 // Room Events
                 on("user_joined") { args ->
                     val data = args[0] as JSONObject
-                    _events.tryEmit(SignalingEvent.UserJoined(data.getString("userId"), data.getString("name")))
+                    _events.tryEmit(SignalingEvent.UserJoined(
+                        userId = data.getString("userId"),
+                        name = data.getString("name"),
+                        role = UserRole.valueOf(data.optString("role", UserRole.WORKER.name))
+                    ))
                 }
                 on("user_left") { args ->
                     val data = args[0] as JSONObject
@@ -230,7 +234,7 @@ sealed class SignalingEvent {
         val sequence: Int
     ) : SignalingEvent()
     
-    data class UserJoined(val userId: String, val name: String) : SignalingEvent()
+    data class UserJoined(val userId: String, val name: String, val role: UserRole) : SignalingEvent()
     data class UserLeft(val userId: String) : SignalingEvent()
     data class ChannelInfo(val members: List<JSONObject>, val floorState: JSONObject?) : SignalingEvent()
     

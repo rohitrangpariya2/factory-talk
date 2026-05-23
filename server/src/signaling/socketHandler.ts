@@ -70,7 +70,7 @@ export function setupSocketHandler(io: Server) {
       const floorState = getFloorState(channelId);
       
       socket.emit('channel_info', { members, floorHolder: floorState.currentSpeaker });
-      socket.to(channelId).emit('user_joined', { userId: user.userId, name: user.userName });
+      socket.to(channelId).emit('user_joined', { userId: user.userId, name: user.userName, role: user.role });
     });
 
     socket.on('audio_chunk', (payload) => {

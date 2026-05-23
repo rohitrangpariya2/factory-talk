@@ -3,6 +3,8 @@ package com.factorytalk.app.ui.screens
 import android.app.Activity
 import android.content.Intent
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -47,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +70,7 @@ import com.factorytalk.app.ui.components.StatusBar
 import com.factorytalk.app.ui.components.TalkButton
 import com.factorytalk.app.ui.theme.OnlineGreen
 import com.factorytalk.app.util.Constants
+import com.factorytalk.app.util.PermissionHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,11 +88,39 @@ fun HomeScreen(
     val currentSpeaker by viewModel.currentSpeaker.collectAsState()
     val onlineUsers by viewModel.onlineUsers.collectAsState()
     val talkDuration by viewModel.talkDurationSeconds.collectAsState()
+    val requiredPermissions = remember { PermissionHelper.requiredPermissions }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions[android.Manifest.permission.RECORD_AUDIO] == true) {
+            currentChannel?.let { channel ->
+                val startIntent = Intent(context, TalkForegroundService::class.java).apply {
+                    action = Constants.ACTION_START_SERVICE
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(startIntent)
+                } else {
+                    context.startService(startIntent)
+                }
+                context.startService(Intent(context, TalkForegroundService::class.java).apply {
+                    action = Constants.ACTION_JOIN_CHANNEL
+                    putExtra(Constants.EXTRA_CHANNEL_ID, channel.id)
+                })
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val missingPermissions = PermissionHelper.getMissingPermissions(context)
+        if (missingPermissions.isNotEmpty()) {
+            permissionLauncher.launch(missingPermissions.toTypedArray())
+        }
+    }
 
     // Start foreground service when Home opens
     LaunchedEffect(currentChannel) {
         currentChannel?.let { channel ->
-            if (com.factorytalk.app.util.PermissionHelper.hasRecordAudioPermission(context)) {
+            if (PermissionHelper.hasRecordAudioPermission(context)) {
                 try {
                     val intent = Intent(context, TalkForegroundService::class.java).apply {
                         action = Constants.ACTION_START_SERVICE
@@ -329,11 +361,12 @@ fun HomeScreen(
                             action = Constants.ACTION_START_TALKING
                         }
                         context.startService(intent)
-                    } else {
-                        android.util.Log.d("HomeScreen", "Missing permission!")
-                        android.widget.Toast.makeText(context, "Microphone permission required", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                },
+            } else {
+                android.util.Log.d("HomeScreen", "Missing permission!")
+                permissionLauncher.launch(requiredPermissions)
+                android.widget.Toast.makeText(context, "Microphone permission required", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        },
                 onPressEnd = {
                     android.util.Log.d("HomeScreen", "onPressEnd triggered")
                     val intent = Intent(context, TalkForegroundService::class.java).apply {

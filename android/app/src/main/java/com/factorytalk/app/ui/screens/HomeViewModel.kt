@@ -10,6 +10,7 @@ import com.factorytalk.app.data.model.TalkSession
 import com.factorytalk.app.data.model.User
 import com.factorytalk.app.data.model.UserRole
 import com.factorytalk.app.data.remote.SignalingClient
+import com.factorytalk.app.data.remote.SignalingEvent
 import com.factorytalk.app.data.repository.ChannelRepository
 import com.factorytalk.app.data.repository.UserRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import javax.inject.Inject
 
 @HiltViewModel
@@ -40,6 +42,7 @@ class HomeViewModel @Inject constructor(
 
     private val _onlineUsers = MutableStateFlow<List<User>>(emptyList())
     val onlineUsers: StateFlow<List<User>> = _onlineUsers.asStateFlow()
+    private val onlineUserMap = linkedMapOf<String, User>()
 
     private val _currentChannel = MutableStateFlow<Channel?>(null)
     val currentChannel: StateFlow<Channel?> = _currentChannel.asStateFlow()
@@ -67,9 +70,59 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             // Listen for users
             userRepository.getUsers().collect { users ->
-                _onlineUsers.value = users.filter { it.isOnline }.sortedByDescending { it.role.priority }
+                onlineUserMap.clear()
+                users.filter { it.isOnline }.forEach { onlineUserMap[it.id] = it }
+                publishOnlineUsers()
             }
         }
+
+        viewModelScope.launch {
+            signalingClient.events.collect { event ->
+                when (event) {
+                    is SignalingEvent.ChannelInfo -> {
+                        event.members.forEach { member ->
+                            userFromJson(member)?.let { onlineUserMap[it.id] = it }
+                        }
+                        publishOnlineUsers()
+                    }
+                    is SignalingEvent.UserJoined -> {
+                        onlineUserMap[event.userId] = User(
+                            id = event.userId,
+                            displayName = event.name,
+                            role = event.role,
+                            isOnline = true
+                        )
+                        publishOnlineUsers()
+                    }
+                    is SignalingEvent.UserLeft -> {
+                        onlineUserMap.remove(event.userId)
+                        publishOnlineUsers()
+                    }
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    private fun publishOnlineUsers() {
+        _onlineUsers.value = onlineUserMap.values
+            .filter { it.isOnline }
+            .distinctBy { it.id }
+            .sortedByDescending { it.role.priority }
+    }
+
+    private fun userFromJson(member: JSONObject): User? {
+        val id = member.optString("userId").ifBlank { return null }
+        val name = member.optString("userName", member.optString("name", "Factory Phone"))
+        val role = runCatching { UserRole.valueOf(member.optString("role", UserRole.WORKER.name)) }
+            .getOrDefault(UserRole.WORKER)
+
+        return User(
+            id = id,
+            displayName = name,
+            role = role,
+            isOnline = true
+        )
     }
 
     fun requestFloor() {
