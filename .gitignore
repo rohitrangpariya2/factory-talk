@@ -1,0 +1,31 @@
+# Secrets
+server/.env
+server/serviceAccountKey.json
+factory-talk-firebase-adminsdk-*.json
+
+# Node
+server/node_modules/
+server/dist/
+npm-debug.log*
+
+# Android / Gradle
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+*.aab
+
+# Bundled local tools and archives
+jdk-17.0.11+9/
+java17.zip
+android/gradle.zip
+android/gradle_dist/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+Thumbs.db
+.DS_Store

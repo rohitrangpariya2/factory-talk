@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "477798463975",
+    "project_id": "factory-talk",
+    "storage_bucket": "factory-talk.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:477798463975:android:faf973e5960b832de26542",
+        "android_client_info": {
+          "package_name": "com.factorytalk.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "477798463975-ho1n3ldd3d6o942o6d8h52p56qv1hpod.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDvdMflCC0zvsmyd7skS0zrdMg5v5MNmX8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "477798463975-ho1n3ldd3d6o942o6d8h52p56qv1hpod.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

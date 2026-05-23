@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ફેક્ટરી ટોક (Factory Talk)</string>
+    <string name="login_title">ફેક્ટરી ટોક</string>
+    <string name="login_subtitle">સાઇન ઇન કરવા તમારો ફોન નંબર દાખલ કરો</string>
+    <string name="phone_number">ફોન નંબર</string>
+    <string name="send_otp">OTP મોકલો</string>
+    <string name="enter_otp">6-અંકનો OTP દાખલ કરો</string>
+    <string name="verify_otp">ચકાસો (Verify)</string>
+    <string name="display_name">તમારું નામ</string>
+    <string name="save_profile">પ્રોફાઇલ સાચવો</string>
+    
+    <string name="common_channel">📢 ફેક્ટરી કોમન ચેનલ</string>
+    <string name="hold_to_talk">🎤 બોલવા દબાવો</string>
+    <string name="listening">સાંભળી રહ્યા છીએ...</string>
+    <string name="talking">બોલી રહ્યા છો...</string>
+    <string name="denied">ચેનલ વ્યસ્ત છે</string>
+    <string name="now_talking">અત્યારે બોલે છે: %1$s</string>
+    
+    <string name="private_talk">ખાનગી વાત</string>
+    <string name="emergency">ઇમરજન્સી</string>
+    <string name="admin_panel">એડમિન પેનલ</string>
+    <string name="setup_guide">સેટઅપ ગાઇડ</string>
+    
+    <string name="status_connected">જોડાયેલ છે</string>
+    <string name="status_connecting">જોડાઈ રહ્યું છે...</string>
+    <string name="status_disconnected">ઓફલાઇન</string>
+    <string name="status_reconnecting">ફરી જોડાઈ રહ્યું છે...</string>
+</resources>
