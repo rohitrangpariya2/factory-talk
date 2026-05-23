@@ -34,6 +34,7 @@ class RelayAudioManager @Inject constructor(
     private var recordingJob: Job? = null
     private var playbackJob: Job? = null
     private var playbackTrack: AudioTrack? = null
+    private var isRecording = false
     private var sequence = 0
     private val playbackQueue = Channel<ByteArray>(capacity = Channel.UNLIMITED)
 
@@ -65,6 +66,7 @@ class RelayAudioManager @Inject constructor(
             val buffer = ByteArray(chunkSize)
 
             try {
+                isRecording = true
                 recorder.startRecording()
                 while (isActive) {
                     val read = recorder.read(buffer, 0, buffer.size)
@@ -74,6 +76,7 @@ class RelayAudioManager @Inject constructor(
                     }
                 }
             } finally {
+                isRecording = false
                 recorder.stop()
                 recorder.release()
             }
@@ -83,9 +86,12 @@ class RelayAudioManager @Inject constructor(
     fun stopBroadcast() {
         recordingJob?.cancel()
         recordingJob = null
+        isRecording = false
     }
 
     fun playChunk(encodedAudio: String, incomingSampleRate: Int = sampleRate) {
+        if (isRecording) return
+
         val audio = Base64.decode(encodedAudio, Base64.NO_WRAP)
         ensurePlayback(incomingSampleRate)
         playbackQueue.trySend(audio)
@@ -118,8 +124,8 @@ class RelayAudioManager @Inject constructor(
             try {
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-                audioManager.isSpeakerphoneOn = true
                 track.play()
+                track.setVolume(0.75f)
                 for (chunk in playbackQueue) {
                     track.write(chunk, 0, chunk.size)
                 }
