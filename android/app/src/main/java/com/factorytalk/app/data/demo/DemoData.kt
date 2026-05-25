@@ -7,17 +7,25 @@ import com.factorytalk.app.data.model.UserRole
 import com.factorytalk.app.util.Constants
 
 object DemoData {
-    fun currentUser(deviceId: String = Constants.DEMO_USER_ID, deviceName: String = Constants.DEMO_USER_NAME) = User(
+    fun currentUser(
+        deviceId: String = Constants.DEMO_USER_ID,
+        deviceName: String = Constants.DEMO_USER_NAME,
+        role: UserRole = UserRole.WORKER
+    ) = User(
         id = deviceId,
         phoneNumber = "+910000000000",
         displayName = deviceName,
-        role = UserRole.OWNER,
+        role = role,
         isOnline = true,
         channels = listOf(Constants.DEMO_CHANNEL_ID)
     )
 
-    fun users(deviceId: String = Constants.DEMO_USER_ID, deviceName: String = Constants.DEMO_USER_NAME) = listOf(
-        currentUser(deviceId, deviceName)
+    fun users(
+        deviceId: String = Constants.DEMO_USER_ID,
+        deviceName: String = Constants.DEMO_USER_NAME,
+        role: UserRole = UserRole.WORKER
+    ) = listOf(
+        currentUser(deviceId, deviceName, role)
     )
 
     fun commonChannel(deviceId: String = Constants.DEMO_USER_ID, deviceName: String = Constants.DEMO_USER_NAME) = Channel(

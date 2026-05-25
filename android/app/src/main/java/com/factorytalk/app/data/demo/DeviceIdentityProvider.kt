@@ -2,6 +2,7 @@ package com.factorytalk.app.data.demo
 
 import android.content.Context
 import android.provider.Settings
+import com.factorytalk.app.data.model.UserRole
 import com.factorytalk.app.util.Constants
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,5 +31,14 @@ class DeviceIdentityProvider @Inject constructor(
             .edit()
             .putString(Constants.PREF_DEVICE_NAME, name.trim())
             .apply()
+    }
+
+    fun getDeviceRole(): UserRole {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        return if (prefs.getBoolean(Constants.PREF_DEVICE_IS_ADMIN, false)) {
+            UserRole.ADMIN
+        } else {
+            UserRole.WORKER
+        }
     }
 }

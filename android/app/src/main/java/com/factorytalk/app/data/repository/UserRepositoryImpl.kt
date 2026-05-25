@@ -24,11 +24,17 @@ class UserRepositoryImpl @Inject constructor(
         if (Constants.DEMO_MODE) {
             return callbackFlow {
                 fun sendCurrentUser() {
-                    trySend(DemoData.currentUser(deviceIdentityProvider.getDeviceId(), deviceIdentityProvider.getDeviceName()))
+                    trySend(
+                        DemoData.currentUser(
+                            deviceIdentityProvider.getDeviceId(),
+                            deviceIdentityProvider.getDeviceName(),
+                            deviceIdentityProvider.getDeviceRole()
+                        )
+                    )
                 }
 
                 val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-                    if (key == Constants.PREF_DEVICE_NAME) sendCurrentUser()
+                    if (key == Constants.PREF_DEVICE_NAME || key == Constants.PREF_DEVICE_IS_ADMIN) sendCurrentUser()
                 }
 
                 sendCurrentUser()
@@ -51,11 +57,17 @@ class UserRepositoryImpl @Inject constructor(
         if (Constants.DEMO_MODE) {
             return callbackFlow {
                 fun sendUsers() {
-                    trySend(DemoData.users(deviceIdentityProvider.getDeviceId(), deviceIdentityProvider.getDeviceName()))
+                    trySend(
+                        DemoData.users(
+                            deviceIdentityProvider.getDeviceId(),
+                            deviceIdentityProvider.getDeviceName(),
+                            deviceIdentityProvider.getDeviceRole()
+                        )
+                    )
                 }
 
                 val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-                    if (key == Constants.PREF_DEVICE_NAME) sendUsers()
+                    if (key == Constants.PREF_DEVICE_NAME || key == Constants.PREF_DEVICE_IS_ADMIN) sendUsers()
                 }
 
                 sendUsers()

@@ -100,6 +100,9 @@ fun HomeScreen(
     val onlineUsers by viewModel.onlineUsers.collectAsState()
     val talkDuration by viewModel.talkDurationSeconds.collectAsState()
     var showNameDialog by remember { mutableStateOf(false) }
+    var showAdminPinDialog by remember { mutableStateOf(false) }
+    var adminPinInput by remember { mutableStateOf("") }
+    var adminPinError by remember { mutableStateOf(false) }
     val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     var walkieEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_WALKIE_ENABLED, true)) }
     var deviceNameInput by remember(currentUser?.displayName) {
@@ -169,9 +172,14 @@ fun HomeScreen(
                         Column {
                             Text("Factory Talk", fontWeight = FontWeight.Bold)
                             Text(
-                                text = currentUser?.displayName ?: "Factory Phone",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = currentUser?.displayName ?: "Factory Phone",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                            Text(
+                                text = if (prefs.getBoolean(Constants.PREF_DEVICE_IS_ADMIN, false)) "Admin" else "Staff",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     },
@@ -212,10 +220,18 @@ fun HomeScreen(
                         IconButton(onClick = { showNameDialog = true }) {
                             Icon(Icons.Default.Edit, contentDescription = "Edit device name")
                         }
-                        if (currentUser?.role == UserRole.OWNER || currentUser?.role == UserRole.ADMIN) {
-                            IconButton(onClick = onNavigateToAdmin) {
-                                Icon(Icons.Default.Settings, contentDescription = "Admin")
+                        IconButton(
+                            onClick = {
+                                if (prefs.getBoolean(Constants.PREF_DEVICE_IS_ADMIN, false)) {
+                                    onNavigateToAdmin()
+                                } else {
+                                    adminPinInput = ""
+                                    adminPinError = false
+                                    showAdminPinDialog = true
+                                }
                             }
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = "Admin")
                         }
                     }
                 )
@@ -254,6 +270,67 @@ fun HomeScreen(
                 },
                 dismissButton = {
                     TextButton(onClick = { showNameDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showAdminPinDialog) {
+            AlertDialog(
+                onDismissRequest = { showAdminPinDialog = false },
+                title = { Text("Admin PIN") },
+                text = {
+                    Column {
+                        Text(
+                            text = "Admin Panel mate PIN nakho. Default PIN 1234 che; pachhi Admin Panel ma badli sako.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = adminPinInput,
+                            onValueChange = {
+                                adminPinInput = it.take(8)
+                                adminPinError = false
+                            },
+                            singleLine = true,
+                            isError = adminPinError,
+                            label = { Text("PIN") }
+                        )
+                        if (adminPinError) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Wrong PIN",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val savedPin = prefs.getString(Constants.PREF_ADMIN_PIN, Constants.DEFAULT_ADMIN_PIN)
+                                ?: Constants.DEFAULT_ADMIN_PIN
+                            if (adminPinInput == savedPin) {
+                                prefs.edit().putBoolean(Constants.PREF_DEVICE_IS_ADMIN, true).apply()
+                                context.startService(Intent(context, TalkForegroundService::class.java).apply {
+                                    action = Constants.ACTION_REFRESH_IDENTITY
+                                })
+                                showAdminPinDialog = false
+                                onNavigateToAdmin()
+                            } else {
+                                adminPinError = true
+                            }
+                        },
+                        enabled = adminPinInput.isNotBlank()
+                    ) {
+                        Text("Unlock")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAdminPinDialog = false }) {
                         Text("Cancel")
                     }
                 }

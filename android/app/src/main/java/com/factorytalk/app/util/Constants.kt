@@ -59,6 +59,9 @@ object Constants {
     const val PREF_REMINDER_ON_TIME = "reminder_on_time"
     const val PREF_REMINDER_OFF_TIME = "reminder_off_time"
     const val PREF_LOCATION_SHARING_ENABLED = "location_sharing_enabled"
+    const val PREF_DEVICE_IS_ADMIN = "device_is_admin"
+    const val PREF_ADMIN_PIN = "admin_pin"
+    const val DEFAULT_ADMIN_PIN = "1234"
     
     // PTT Config
     const val MAX_TALK_DURATION_SECONDS = 60

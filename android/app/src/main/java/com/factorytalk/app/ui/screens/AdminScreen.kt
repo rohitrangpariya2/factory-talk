@@ -1,5 +1,7 @@
 package com.factorytalk.app.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,6 +46,7 @@ import com.factorytalk.app.data.model.User
 import com.factorytalk.app.data.remote.SignalingClient
 import com.factorytalk.app.data.repository.ChannelRepository
 import com.factorytalk.app.service.ReminderScheduler
+import com.factorytalk.app.service.TalkForegroundService
 import com.factorytalk.app.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -103,6 +106,9 @@ fun AdminScreen(
     var channelName by remember { mutableStateOf("") }
     var onTime by remember { mutableStateOf(prefs.getString(Constants.PREF_REMINDER_ON_TIME, "09:00") ?: "09:00") }
     var offTime by remember { mutableStateOf(prefs.getString(Constants.PREF_REMINDER_OFF_TIME, "20:00") ?: "20:00") }
+    var currentPin by remember { mutableStateOf("") }
+    var newPin by remember { mutableStateOf("") }
+    var pinMessage by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -121,6 +127,90 @@ fun AdminScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Admin Access",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Aa phone Admin che. Staff phone ma Admin Panel kholva PIN joie.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = currentPin,
+                            onValueChange = {
+                                currentPin = it.take(8)
+                                pinMessage = ""
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("Current PIN") },
+                            placeholder = { Text(Constants.DEFAULT_ADMIN_PIN) }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = newPin,
+                            onValueChange = {
+                                newPin = it.take(8)
+                                pinMessage = ""
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("New PIN") }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    val savedPin = prefs.getString(Constants.PREF_ADMIN_PIN, Constants.DEFAULT_ADMIN_PIN)
+                                        ?: Constants.DEFAULT_ADMIN_PIN
+                                    pinMessage = if (currentPin == savedPin && newPin.length >= 4) {
+                                        prefs.edit().putString(Constants.PREF_ADMIN_PIN, newPin).apply()
+                                        currentPin = ""
+                                        newPin = ""
+                                        "PIN saved"
+                                    } else {
+                                        "Current PIN wrong or new PIN short"
+                                    }
+                                },
+                                enabled = currentPin.isNotBlank() && newPin.isNotBlank()
+                            ) {
+                                Text("Save PIN")
+                            }
+                            Button(
+                                onClick = {
+                                    prefs.edit().putBoolean(Constants.PREF_DEVICE_IS_ADMIN, false).apply()
+                                    context.startService(Intent(context, TalkForegroundService::class.java).apply {
+                                        action = Constants.ACTION_REFRESH_IDENTITY
+                                    })
+                                    pinMessage = "This phone is Staff now"
+                                }
+                            ) {
+                                Text("Make Staff")
+                            }
+                        }
+                        if (pinMessage.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = pinMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+
             item {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -257,6 +347,7 @@ fun AdminScreen(
 
 @Composable
 private fun DutyLocationsCard(users: List<User>) {
+    val context = LocalContext.current
     val locationUsers = users.filter { it.latitude != null && it.longitude != null && it.locationUpdatedAt > 0 }
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -265,7 +356,7 @@ private fun DutyLocationsCard(users: List<User>) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Duty Locations",
+                text = "Live Location Tracking",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -287,7 +378,7 @@ private fun DutyLocationsCard(users: List<User>) {
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "${"%.5f".format(latitude)}, ${"%.5f".format(longitude)}",
+                    text = "Live point: ${"%.5f".format(latitude)}, ${"%.5f".format(longitude)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -296,6 +387,16 @@ private fun DutyLocationsCard(users: List<User>) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(
+                    onClick = {
+                        val uri = Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude(${Uri.encode(user.displayName)})")
+                        val mapIntent = Intent(Intent.ACTION_VIEW, uri)
+                        runCatching { context.startActivity(mapIntent) }
+                    }
+                ) {
+                    Text("Track on Map")
+                }
                 Spacer(modifier = Modifier.height(10.dp))
             }
         }
