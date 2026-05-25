@@ -33,8 +33,8 @@ object DataModule {
 
     @Provides
     @Singleton
-    fun provideSignalingClient(): SignalingClient {
-        return SignalingClient()
+    fun provideSignalingClient(@ApplicationContext context: Context): SignalingClient {
+        return SignalingClient(context)
     }
 
     @Provides

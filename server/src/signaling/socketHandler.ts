@@ -9,6 +9,8 @@ import { sendBroadcastWakeUp } from '../services/fcmService';
 import { logTalkStart, logTalkEnd } from '../services/logService';
 import { buildAudioRelayEvent } from './audioRelay';
 
+let reminderSchedule: { onTime: string; offTime: string } | null = null;
+
 export function setupSocketHandler(io: Server) {
   
   // Auth Middleware
@@ -72,7 +74,26 @@ export function setupSocketHandler(io: Server) {
       const floorState = getFloorState(channelId);
       
       socket.emit('channel_info', { members, floorHolder: floorState.currentSpeaker });
-      socket.to(channelId).emit('user_joined', { userId: user.userId, name: user.userName, role: user.role, isBusy: !!user.isBusy });
+      if (reminderSchedule) {
+        socket.emit('reminder_schedule_updated', reminderSchedule);
+      }
+      socket.to(channelId).emit('user_joined', {
+        userId: user.userId,
+        name: user.userName,
+        role: user.role,
+        isBusy: !!user.isBusy,
+        latitude: user.latitude,
+        longitude: user.longitude,
+        locationUpdatedAt: user.locationUpdatedAt
+      });
+    });
+
+    socket.on('set_reminder_schedule', (payload) => {
+      const onTime = typeof payload?.onTime === 'string' ? payload.onTime : '';
+      const offTime = typeof payload?.offTime === 'string' ? payload.offTime : '';
+      if (!/^\d{2}:\d{2}$/.test(onTime) || !/^\d{2}:\d{2}$/.test(offTime)) return;
+      reminderSchedule = { onTime, offTime };
+      io.emit('reminder_schedule_updated', reminderSchedule);
     });
 
     socket.on('user_status', (payload) => {
@@ -82,6 +103,27 @@ export function setupSocketHandler(io: Server) {
         socket.to(channelId).emit('user_status', {
           userId: user.userId,
           isBusy: !!user.isBusy
+        });
+      }
+    });
+
+    socket.on('location_update', (payload) => {
+      const latitude = Number(payload?.latitude);
+      const longitude = Number(payload?.longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return;
+
+      user.latitude = latitude;
+      user.longitude = longitude;
+      user.locationUpdatedAt = Date.now();
+
+      const channelIds = Array.from(socket.rooms).filter(room => room !== socket.id);
+      for (const channelId of channelIds) {
+        socket.to(channelId).emit('user_location_updated', {
+          userId: user.userId,
+          latitude: user.latitude,
+          longitude: user.longitude,
+          locationUpdatedAt: user.locationUpdatedAt
         });
       }
     });

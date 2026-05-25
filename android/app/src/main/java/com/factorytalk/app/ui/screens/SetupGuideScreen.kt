@@ -1,6 +1,7 @@
 package com.factorytalk.app.ui.screens
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Build
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +48,7 @@ import com.factorytalk.app.data.model.ConnectionState
 import com.factorytalk.app.data.model.ServerHealthStatus
 import com.factorytalk.app.data.remote.ServerHealthMonitor
 import com.factorytalk.app.data.remote.SignalingClient
+import com.factorytalk.app.service.TalkForegroundService
 import com.factorytalk.app.util.BatteryOptimizationHelper
 import com.factorytalk.app.util.Constants
 import com.factorytalk.app.util.PermissionHelper
@@ -81,6 +83,7 @@ fun SetupGuideScreen(
     var hasRequiredPermissions by remember { mutableStateOf(false) }
     var isIgnoringBattery by remember { mutableStateOf(false) }
     var allowAudioDuringCall by remember { mutableStateOf(false) }
+    var locationSharingEnabled by remember { mutableStateOf(false) }
     val connectionState by viewModel.connectionState.collectAsState()
     val serverHealthStatus by viewModel.serverHealthStatus.collectAsState()
 
@@ -94,6 +97,9 @@ fun SetupGuideScreen(
                 allowAudioDuringCall = context
                     .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
                     .getBoolean(Constants.PREF_ALLOW_AUDIO_DURING_CALL, false)
+                locationSharingEnabled = context
+                    .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                    .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -191,6 +197,71 @@ fun SetupGuideScreen(
                                     .edit()
                                     .putBoolean(Constants.PREF_ALLOW_AUDIO_DURING_CALL, checked)
                                     .apply()
+                            }
+                        )
+                    }
+                }
+            }
+
+            item {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Duty location sharing", fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (locationSharingEnabled) {
+                                    "Admin panel ma aa phone nu last location/time dekhase."
+                                } else {
+                                    "OFF hoy tyare admin ne aa phone nu location moklavama nahi ave."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = locationSharingEnabled,
+                            onCheckedChange = { checked ->
+                                locationSharingEnabled = checked
+                                context.getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                                    .edit()
+                                    .putBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, checked)
+                                    .apply()
+
+                                if (checked && !PermissionHelper.hasLocationPermission(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                    var currentContext = context
+                                    while (currentContext is android.content.ContextWrapper) {
+                                        if (currentContext is Activity) break
+                                        currentContext = currentContext.baseContext
+                                    }
+                                    (currentContext as? Activity)?.let {
+                                        androidx.core.app.ActivityCompat.requestPermissions(
+                                            it,
+                                            arrayOf(
+                                                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                                android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                            ),
+                                            101
+                                        )
+                                    }
+                                }
+
+                                val serviceIntent = Intent(context, TalkForegroundService::class.java).apply {
+                                    action = Constants.ACTION_START_SERVICE
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    context.startForegroundService(serviceIntent)
+                                } else {
+                                    context.startService(serviceIntent)
+                                }
                             }
                         )
                     }

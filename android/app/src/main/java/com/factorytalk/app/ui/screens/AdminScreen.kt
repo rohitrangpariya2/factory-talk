@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -39,19 +40,29 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.factorytalk.app.data.model.Channel
 import com.factorytalk.app.data.model.ChannelType
+import com.factorytalk.app.data.model.User
+import com.factorytalk.app.data.remote.SignalingClient
 import com.factorytalk.app.data.repository.ChannelRepository
+import com.factorytalk.app.service.ReminderScheduler
 import com.factorytalk.app.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
 class AdminViewModel @Inject constructor(
-    private val channelRepository: ChannelRepository
+    private val channelRepository: ChannelRepository,
+    private val signalingClient: SignalingClient
 ) : ViewModel() {
     val channels = channelRepository.getChannels()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val onlineUsers = signalingClient.onlineUsers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun addDepartmentChannel(department: String, channelName: String) {
@@ -73,6 +84,10 @@ class AdminViewModel @Inject constructor(
             channelRepository.deleteChannel(channel.id)
         }
     }
+
+    fun setReminderSchedule(onTime: String, offTime: String) {
+        signalingClient.setReminderSchedule(onTime, offTime)
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,9 +95,14 @@ class AdminViewModel @Inject constructor(
 fun AdminScreen(
     viewModel: AdminViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val channels by viewModel.channels.collectAsState()
+    val onlineUsers by viewModel.onlineUsers.collectAsState()
+    val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     var department by remember { mutableStateOf("") }
     var channelName by remember { mutableStateOf("") }
+    var onTime by remember { mutableStateOf(prefs.getString(Constants.PREF_REMINDER_ON_TIME, "09:00") ?: "09:00") }
+    var offTime by remember { mutableStateOf(prefs.getString(Constants.PREF_REMINDER_OFF_TIME, "20:00") ?: "20:00") }
 
     Scaffold(
         topBar = {
@@ -101,6 +121,61 @@ fun AdminScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Walkie Talkie Reminder",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = onTime,
+                                onValueChange = { onTime = it.take(5) },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                label = { Text("ON time") },
+                                placeholder = { Text("09:00") }
+                            )
+                            OutlinedTextField(
+                                value = offTime,
+                                onValueChange = { offTime = it.take(5) },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                label = { Text("OFF time") },
+                                placeholder = { Text("20:00") }
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                ReminderScheduler.saveSchedule(context, onTime, offTime)
+                                viewModel.setReminderSchedule(onTime, offTime)
+                            },
+                            enabled = isValidTime(onTime) && isValidTime(offTime)
+                        ) {
+                            Text("Save & Send to all phones")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Aa schedule connected phones ne moklavse. Offline phone reconnect thase tyare schedule receive karse.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            item {
+                DutyLocationsCard(users = onlineUsers)
+            }
+
             item {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -178,4 +253,62 @@ fun AdminScreen(
             }
         }
     }
+}
+
+@Composable
+private fun DutyLocationsCard(users: List<User>) {
+    val locationUsers = users.filter { it.latitude != null && it.longitude != null && it.locationUpdatedAt > 0 }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Duty Locations",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (locationUsers.isEmpty()) {
+                Text(
+                    text = "Koi phone e location sharing ON kari nathi athva location haju receive nathi thayu.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                return@Column
+            }
+            locationUsers.forEach { user ->
+                val latitude = user.latitude ?: return@forEach
+                val longitude = user.longitude ?: return@forEach
+                Text(
+                    text = user.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "${"%.5f".format(latitude)}, ${"%.5f".format(longitude)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Last: ${formatLocationTime(user.locationUpdatedAt)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+        }
+    }
+}
+
+private fun formatLocationTime(timestamp: Long): String {
+    return SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(timestamp))
+}
+
+private fun isValidTime(time: String): Boolean {
+    val parts = time.split(":")
+    val hour = parts.getOrNull(0)?.toIntOrNull()
+    val minute = parts.getOrNull(1)?.toIntOrNull()
+    return parts.size == 2 && hour in 0..23 && minute in 0..59
 }

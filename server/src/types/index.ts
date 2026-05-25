@@ -68,6 +68,9 @@ export interface ConnectedUser {
   fcmToken?: string;
   isDeviceAuth?: boolean;
   isBusy?: boolean;
+  latitude?: number;
+  longitude?: number;
+  locationUpdatedAt?: number;
 }
 
 export interface TalkLog {

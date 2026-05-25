@@ -5,14 +5,19 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import com.factorytalk.app.MainActivity
 import com.factorytalk.app.R
 import com.factorytalk.app.audio.AudioRouteManager
@@ -62,6 +67,8 @@ class TalkForegroundService : Service() {
     private var signalingJob: Job? = null
     private var reconnectJob: Job? = null
     private var callStatusJob: Job? = null
+    private var locationJob: Job? = null
+    private var locationListener: LocationListener? = null
     private var isTalking = false
     private var lastCallBusyStatus = false
     private var explicitStopRequested = false
@@ -88,6 +95,7 @@ class TalkForegroundService : Service() {
             observeServerStatus()
             observeNetworkReconnect()
             observeCallStatus()
+            observeLocationSharing()
             initializeSignaling()
             ServiceRestartScheduler.scheduleWatchdog(this)
         }
@@ -239,6 +247,65 @@ class TalkForegroundService : Service() {
         }
     }
 
+    private fun observeLocationSharing() {
+        if (locationJob?.isActive == true) return
+        locationJob = serviceScope.launch {
+            while (true) {
+                val enabled = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
+                if (enabled && hasLocationPermission()) {
+                    if (locationListener == null) {
+                        startForegroundServiceWithNotification()
+                    }
+                    startLocationUpdates()
+                } else {
+                    stopLocationUpdates()
+                }
+                delay(15_000L)
+            }
+        }
+    }
+
+    private fun startLocationUpdates() {
+        if (locationListener != null) return
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val provider = when {
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+            locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+            else -> return
+        }
+        val listener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                signalingClient.sendLocation(location.latitude, location.longitude)
+            }
+        }
+        try {
+            locationListener = listener
+            locationManager.getLastKnownLocation(provider)?.let {
+                signalingClient.sendLocation(it.latitude, it.longitude)
+            }
+            locationManager.requestLocationUpdates(provider, 30_000L, 25f, listener)
+        } catch (e: SecurityException) {
+            locationListener = null
+        } catch (e: IllegalArgumentException) {
+            locationListener = null
+        }
+    }
+
+    private fun stopLocationUpdates() {
+        val listener = locationListener ?: return
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        runCatching { locationManager.removeUpdates(listener) }
+        locationListener = null
+    }
+
+    private fun hasLocationPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
     private fun observeServerStatus() {
         if (statusJob?.isActive == true) return
         statusJob = serviceScope.launch {
@@ -368,6 +435,11 @@ class TalkForegroundService : Service() {
         var type = 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            val locationEnabled = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
+            if (locationEnabled && hasLocationPermission()) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            }
         }
         
         try {
@@ -458,6 +530,9 @@ class TalkForegroundService : Service() {
         reconnectJob = null
         callStatusJob?.cancel()
         callStatusJob = null
+        locationJob?.cancel()
+        locationJob = null
+        stopLocationUpdates()
         if (wakeLock?.isHeld == true) wakeLock?.release()
         runCatching { connectionWatchdog.stop() }
         serverHealthMonitor.stop()

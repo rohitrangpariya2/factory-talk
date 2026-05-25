@@ -22,6 +22,7 @@ object Constants {
     const val NOTIFICATION_CHANNEL_PTT_SERVICE = "ptt_service_channel"
     const val NOTIFICATION_CHANNEL_INCOMING = "ptt_incoming_channel"
     const val NOTIFICATION_CHANNEL_EMERGENCY = "ptt_emergency_channel"
+    const val NOTIFICATION_CHANNEL_REMINDERS = "walkie_reminders_channel"
     
     // Notification IDs
     const val NOTIFICATION_ID_FOREGROUND = 1001
@@ -44,6 +45,8 @@ object Constants {
     const val EXTRA_CHANNEL_ID = "extra_channel_id"
     const val EXTRA_SPEAKER_NAME = "extra_speaker_name"
     const val EXTRA_TARGET_USER_ID = "extra_target_user_id"
+    const val EXTRA_REMINDER_MESSAGE = "extra_reminder_message"
+    const val EXTRA_REMINDER_ID = "extra_reminder_id"
     
     // Shared Preferences
     const val PREFS_NAME = "factory_talk_prefs"
@@ -53,6 +56,9 @@ object Constants {
     const val PREF_DEMO_CHANNELS = "demo_channels"
     const val PREF_ALLOW_AUDIO_DURING_CALL = "allow_audio_during_call"
     const val PREF_WALKIE_ENABLED = "walkie_enabled"
+    const val PREF_REMINDER_ON_TIME = "reminder_on_time"
+    const val PREF_REMINDER_OFF_TIME = "reminder_off_time"
+    const val PREF_LOCATION_SHARING_ENABLED = "location_sharing_enabled"
     
     // PTT Config
     const val MAX_TALK_DURATION_SECONDS = 60

@@ -1,9 +1,11 @@
 package com.factorytalk.app.data.remote
 
+import android.content.Context
 import android.util.Log
 import com.factorytalk.app.data.model.ConnectionState
 import com.factorytalk.app.data.model.User
 import com.factorytalk.app.data.model.UserRole
+import com.factorytalk.app.service.ReminderScheduler
 import io.socket.client.IO
 import io.socket.client.Socket
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -18,7 +20,9 @@ import org.webrtc.IceCandidate
 import org.webrtc.SessionDescription
 import java.net.URI
 
-class SignalingClient {
+class SignalingClient(
+    private val appContext: Context? = null
+) {
     private var socket: Socket? = null
     
     private val _events = MutableSharedFlow<SignalingEvent>(extraBufferCapacity = 64)
@@ -139,7 +143,10 @@ class SignalingClient {
                         displayName = data.getString("name"),
                         role = UserRole.valueOf(data.optString("role", UserRole.WORKER.name)),
                         isOnline = true,
-                        isBusy = data.optBoolean("isBusy", false)
+                        isBusy = data.optBoolean("isBusy", false),
+                        latitude = data.optNullableDouble("latitude"),
+                        longitude = data.optNullableDouble("longitude"),
+                        locationUpdatedAt = data.optLong("locationUpdatedAt", 0L)
                     )
                     onlineUserMap[user.id] = user
                     publishOnlineUsers()
@@ -166,6 +173,24 @@ class SignalingClient {
                     }
                     _events.tryEmit(SignalingEvent.UserStatusChanged(userId, isBusy))
                 }
+                on("user_location_updated") { args ->
+                    val data = args[0] as JSONObject
+                    val userId = data.getString("userId")
+                    val latitude = data.optNullableDouble("latitude")
+                    val longitude = data.optNullableDouble("longitude")
+                    val updatedAt = data.optLong("locationUpdatedAt", 0L)
+                    onlineUserMap[userId]?.let { user ->
+                        onlineUserMap[userId] = user.copy(
+                            latitude = latitude,
+                            longitude = longitude,
+                            locationUpdatedAt = updatedAt
+                        )
+                        publishOnlineUsers()
+                    }
+                    if (latitude != null && longitude != null) {
+                        _events.tryEmit(SignalingEvent.UserLocationUpdated(userId, latitude, longitude, updatedAt))
+                    }
+                }
                 on("channel_info") { args ->
                     val data = args[0] as JSONObject
                     val membersArray = data.getJSONArray("members")
@@ -178,6 +203,13 @@ class SignalingClient {
                     publishOnlineUsers()
                     val floorHolder = if (data.isNull("floorHolder")) null else data.getJSONObject("floorHolder")
                     _events.tryEmit(SignalingEvent.ChannelInfo(members, floorHolder))
+                }
+                on("reminder_schedule_updated") { args ->
+                    val data = args[0] as JSONObject
+                    val onTime = data.optString("onTime")
+                    val offTime = data.optString("offTime")
+                    appContext?.let { ReminderScheduler.saveSchedule(it, onTime, offTime) }
+                    _events.tryEmit(SignalingEvent.ReminderScheduleUpdated(onTime, offTime))
                 }
                 
                 connect()
@@ -255,7 +287,10 @@ class SignalingClient {
             displayName = name,
             role = role,
             isOnline = true,
-            isBusy = member.optBoolean("isBusy", false)
+            isBusy = member.optBoolean("isBusy", false),
+            latitude = member.optNullableDouble("latitude"),
+            longitude = member.optNullableDouble("longitude"),
+            locationUpdatedAt = member.optLong("locationUpdatedAt", 0L)
         )
     }
 
@@ -265,12 +300,31 @@ class SignalingClient {
         })
     }
 
+    fun setReminderSchedule(onTime: String, offTime: String) {
+        socket?.emit("set_reminder_schedule", JSONObject().apply {
+            put("onTime", onTime)
+            put("offTime", offTime)
+        })
+    }
+
+    fun sendLocation(latitude: Double, longitude: Double) {
+        socket?.emit("location_update", JSONObject().apply {
+            put("latitude", latitude)
+            put("longitude", longitude)
+        })
+    }
+
     private fun publishOnlineUsers() {
         _onlineUsers.value = onlineUserMap.values
             .filter { it.isOnline }
             .distinctBy { it.id }
             .sortedByDescending { it.role.priority }
     }
+}
+
+private fun JSONObject.optNullableDouble(name: String): Double? {
+    if (!has(name) || isNull(name)) return null
+    return optDouble(name).takeIf { !it.isNaN() }
 }
 
 sealed class SignalingEvent {
@@ -297,7 +351,14 @@ sealed class SignalingEvent {
     data class UserJoined(val userId: String, val name: String, val role: UserRole) : SignalingEvent()
     data class UserLeft(val userId: String) : SignalingEvent()
     data class UserStatusChanged(val userId: String, val isBusy: Boolean) : SignalingEvent()
+    data class UserLocationUpdated(
+        val userId: String,
+        val latitude: Double,
+        val longitude: Double,
+        val locationUpdatedAt: Long
+    ) : SignalingEvent()
     data class ChannelInfo(val members: List<JSONObject>, val floorState: JSONObject?) : SignalingEvent()
+    data class ReminderScheduleUpdated(val onTime: String, val offTime: String) : SignalingEvent()
     
     data class Error(val message: String) : SignalingEvent()
 }
