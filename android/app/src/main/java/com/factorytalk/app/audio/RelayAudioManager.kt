@@ -62,7 +62,7 @@ class RelayAudioManager @Inject constructor(
 
         recordingJob = scope.launch {
             val recorder = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 sampleRate,
                 channelConfigIn,
                 audioFormat,
@@ -170,8 +170,27 @@ class RelayAudioManager @Inject constructor(
 
     private fun cleanPcm16(source: ByteArray, length: Int): ByteArray {
         val cleaned = source.copyOf(length)
-        val noiseGate = 280
+        val noiseGate = 430
+        val quietRmsGate = 620.0
+        val softRmsGate = 1050.0
         val limiter = 26000
+        val sampleCount = cleaned.size / 2
+        if (sampleCount == 0) return cleaned
+
+        var energy = 0.0
+        var scanIndex = 0
+        while (scanIndex + 1 < cleaned.size) {
+            var sample = (cleaned[scanIndex].toInt() and 0xFF) or (cleaned[scanIndex + 1].toInt() shl 8)
+            if (sample > Short.MAX_VALUE) sample -= 65536
+            energy += sample.toDouble() * sample.toDouble()
+            scanIndex += 2
+        }
+
+        val rms = kotlin.math.sqrt(energy / sampleCount)
+        if (rms < quietRmsGate) {
+            return ByteArray(length)
+        }
+        val quietGain = if (rms < softRmsGate) 0.35 else 1.0
 
         var i = 0
         while (i + 1 < cleaned.size) {
@@ -183,7 +202,9 @@ class RelayAudioManager @Inject constructor(
                 sample > limiter -> limiter + ((sample - limiter) / 4)
                 sample < -limiter -> -limiter + ((sample + limiter) / 4)
                 else -> sample
-            }.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+            }
+            sample = (sample * quietGain).toInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
 
             cleaned[i] = (sample and 0xFF).toByte()
             cleaned[i + 1] = ((sample shr 8) and 0xFF).toByte()
