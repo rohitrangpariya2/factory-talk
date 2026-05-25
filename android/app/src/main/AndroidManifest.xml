@@ -33,7 +33,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault"
+        android:theme="@style/Theme.FactoryTalk"
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
         
@@ -49,6 +49,7 @@
         <service
             android:name=".service.TalkForegroundService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="microphone|mediaPlayback" />
 
         <service

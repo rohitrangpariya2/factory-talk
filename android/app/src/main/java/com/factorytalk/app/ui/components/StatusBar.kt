@@ -25,10 +25,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.factorytalk.app.data.model.ConnectionState
+import com.factorytalk.app.data.model.ServerHealthStatus
 
 @Composable
 fun StatusBar(
     connectionState: ConnectionState,
+    serverHealthStatus: ServerHealthStatus = ServerHealthStatus.UNKNOWN,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -41,11 +43,19 @@ fun StatusBar(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val (icon, color, text) = when (connectionState) {
-                ConnectionState.CONNECTED -> Triple(Icons.Default.Wifi, Color(0xFF00E676), "Connected")
-                ConnectionState.CONNECTING -> Triple(Icons.Default.Wifi, Color(0xFFFF9800), "Connecting...")
-                ConnectionState.DISCONNECTED -> Triple(Icons.Default.WifiOff, Color.Red, "Offline")
-                ConnectionState.RECONNECTING -> Triple(Icons.Default.Warning, Color(0xFFFF9800), "Reconnecting...")
+            val (icon, color, text) = when {
+                connectionState == ConnectionState.CONNECTED ->
+                    Triple(Icons.Default.Wifi, Color(0xFF00E676), "Connected")
+                serverHealthStatus == ServerHealthStatus.CHECKING ->
+                    Triple(Icons.Default.Wifi, Color(0xFFFF9800), "Connecting... waking server")
+                serverHealthStatus == ServerHealthStatus.OFFLINE ->
+                    Triple(Icons.Default.Warning, Color(0xFFFF9800), "Server sleeping/offline")
+                connectionState == ConnectionState.CONNECTING ->
+                    Triple(Icons.Default.Wifi, Color(0xFFFF9800), "Connecting...")
+                connectionState == ConnectionState.RECONNECTING ->
+                    Triple(Icons.Default.Warning, Color(0xFFFF9800), "Reconnecting...")
+                else ->
+                    Triple(Icons.Default.WifiOff, Color.Red, "Offline")
             }
 
             Box(

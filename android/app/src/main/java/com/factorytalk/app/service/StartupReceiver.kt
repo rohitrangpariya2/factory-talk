@@ -12,7 +12,10 @@ class StartupReceiver : BroadcastReceiver() {
         if (
             action == Intent.ACTION_BOOT_COMPLETED ||
             action == Intent.ACTION_MY_PACKAGE_REPLACED ||
-            action == "android.intent.action.QUICKBOOT_POWERON"
+            action == "android.intent.action.QUICKBOOT_POWERON" ||
+            action == Constants.ACTION_RESTART_SERVICE ||
+            action == Constants.ACTION_SERVICE_WATCHDOG ||
+            action == Constants.ACTION_START_SERVICE
         ) {
             val serviceIntent = Intent(context, TalkForegroundService::class.java).apply {
                 this.action = Constants.ACTION_START_SERVICE
@@ -23,6 +26,7 @@ class StartupReceiver : BroadcastReceiver() {
             } else {
                 context.startService(serviceIntent)
             }
+            ServiceRestartScheduler.scheduleWatchdog(context)
         }
     }
 }

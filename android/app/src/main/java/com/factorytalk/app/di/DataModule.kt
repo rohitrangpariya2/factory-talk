@@ -71,8 +71,9 @@ object DataModule {
     fun provideChannelRepository(
         firestoreDataSource: FirestoreDataSource,
         auth: FirebaseAuth,
-        deviceIdentityProvider: DeviceIdentityProvider
+        deviceIdentityProvider: DeviceIdentityProvider,
+        sharedPreferences: SharedPreferences
     ): ChannelRepository {
-        return ChannelRepositoryImpl(firestoreDataSource, auth, deviceIdentityProvider)
+        return ChannelRepositoryImpl(firestoreDataSource, auth, deviceIdentityProvider, sharedPreferences)
     }
 }

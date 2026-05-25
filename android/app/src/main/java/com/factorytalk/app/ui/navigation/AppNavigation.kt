@@ -7,6 +7,7 @@ sealed class Screen(val route: String) {
     object UserList : Screen("user_list")
     object Admin : Screen("admin")
     object SetupGuide : Screen("setup_guide")
+    object SetupCheck : Screen("setup_check")
     
     data class Channel(val channelId: String) : Screen("channel/$channelId") {
         companion object {

@@ -81,7 +81,8 @@ fun FactoryTalkApp(startDestination: String) {
             HomeScreen(
                 onNavigateToPrivateTalk = { navController.navigate(Screen.PrivateTalk.route) },
                 onNavigateToAdmin = { navController.navigate(Screen.Admin.route) },
-                onNavigateToUserList = { navController.navigate(Screen.UserList.route) }
+                onNavigateToUserList = { navController.navigate(Screen.UserList.route) },
+                onNavigateToSetupCheck = { navController.navigate(Screen.SetupCheck.route) }
             )
         }
         
@@ -91,6 +92,12 @@ fun FactoryTalkApp(startDestination: String) {
         
         composable(Screen.Admin.route) {
             AdminScreen()
+        }
+
+        composable(Screen.SetupCheck.route) {
+            SetupGuideScreen(
+                onSetupComplete = { navController.popBackStack() }
+            )
         }
         
         composable(Screen.UserList.route) {

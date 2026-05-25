@@ -2,7 +2,6 @@ package com.factorytalk.app.ui.screens
 
 import android.app.Activity
 import android.os.Build
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,11 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -26,11 +21,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,25 +36,58 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewModelScope
+import com.factorytalk.app.data.model.ConnectionState
+import com.factorytalk.app.data.model.ServerHealthStatus
+import com.factorytalk.app.data.remote.ServerHealthMonitor
+import com.factorytalk.app.data.remote.SignalingClient
 import com.factorytalk.app.util.BatteryOptimizationHelper
+import com.factorytalk.app.util.Constants
 import com.factorytalk.app.util.PermissionHelper
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import javax.inject.Inject
+
+@HiltViewModel
+class SetupCheckViewModel @Inject constructor(
+    signalingClient: SignalingClient,
+    serverHealthMonitor: ServerHealthMonitor
+) : ViewModel() {
+    val connectionState = signalingClient.connectionState
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ConnectionState.DISCONNECTED)
+
+    val serverHealthStatus = serverHealthMonitor.status
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ServerHealthStatus.UNKNOWN)
+
+    init {
+        serverHealthMonitor.start(Constants.SERVER_URL)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupGuideScreen(
-    onSetupComplete: () -> Unit
+    onSetupComplete: () -> Unit,
+    viewModel: SetupCheckViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     var hasRequiredPermissions by remember { mutableStateOf(false) }
     var isIgnoringBattery by remember { mutableStateOf(false) }
+    val connectionState by viewModel.connectionState.collectAsState()
+    val serverHealthStatus by viewModel.serverHealthStatus.collectAsState()
 
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                val missing = PermissionHelper.getMissingPermissions(context)
-                hasRequiredPermissions = missing.isEmpty()
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasRequiredPermissions = PermissionHelper.getMissingPermissions(context).isEmpty()
                 isIgnoringBattery = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
             }
         }
@@ -74,7 +102,7 @@ fun SetupGuideScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Required Setup") },
+                title = { Text("Setup Check") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -89,34 +117,59 @@ fun SetupGuideScreen(
         ) {
             item {
                 Text(
-                    text = "To ensure you receive all Walkie Talkie broadcasts even when the app is closed, you must configure the following settings:",
+                    text = "Keep every phone green here so Factory Talk can receive even when the app is minimized.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onBackground
                 )
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
             item {
                 SetupStepItem(
-                    title = "1. App Permissions",
-                    description = "Allow microphone, notifications, and background operation.",
+                    title = "Server",
+                    description = when (serverHealthStatus) {
+                        ServerHealthStatus.AWAKE -> "Server is awake."
+                        ServerHealthStatus.CHECKING -> "Checking or waking server."
+                        ServerHealthStatus.OFFLINE -> "Server is sleeping/offline. Wait and retry."
+                        ServerHealthStatus.UNKNOWN -> "Waiting for server check."
+                    },
+                    isCompleted = serverHealthStatus == ServerHealthStatus.AWAKE,
+                    actionText = "Wait",
+                    onAction = {}
+                )
+            }
+
+            item {
+                SetupStepItem(
+                    title = "This Phone Connection",
+                    description = when (connectionState) {
+                        ConnectionState.CONNECTED -> "This phone is online and ready."
+                        ConnectionState.CONNECTING -> "Connecting to server."
+                        ConnectionState.RECONNECTING -> "Reconnecting. Check internet if this stays orange."
+                        ConnectionState.DISCONNECTED -> "Offline. Open app, allow permissions, and check battery setting."
+                    },
+                    isCompleted = connectionState == ConnectionState.CONNECTED,
+                    actionText = "Open App",
+                    onAction = {}
+                )
+            }
+
+            item {
+                SetupStepItem(
+                    title = "App Permissions",
+                    description = "Allow microphone, notifications, network, and Bluetooth permissions.",
                     isCompleted = hasRequiredPermissions,
                     actionText = "Grant Permissions",
                     onAction = {
                         val missing = PermissionHelper.getMissingPermissions(context)
-                        if (missing.isNotEmpty()) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                var currentContext = context
-                                while (currentContext is android.content.ContextWrapper) {
-                                    if (currentContext is Activity) {
-                                        break
-                                    }
-                                    currentContext = currentContext.baseContext
-                                }
-                                val activity = currentContext as? Activity
-                                activity?.let {
-                                    androidx.core.app.ActivityCompat.requestPermissions(it, missing.toTypedArray(), 100)
-                                }
+                        if (missing.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            var currentContext = context
+                            while (currentContext is android.content.ContextWrapper) {
+                                if (currentContext is Activity) break
+                                currentContext = currentContext.baseContext
+                            }
+                            (currentContext as? Activity)?.let {
+                                androidx.core.app.ActivityCompat.requestPermissions(it, missing.toTypedArray(), 100)
                             }
                         }
                     }
@@ -125,8 +178,8 @@ fun SetupGuideScreen(
 
             item {
                 SetupStepItem(
-                    title = "2. Battery Optimization",
-                    description = "Allow the app to run in the background without being killed by Android.",
+                    title = "Battery Optimization",
+                    description = "Set Factory Talk to Unrestricted or Don't optimize.",
                     isCompleted = isIgnoringBattery,
                     actionText = "Disable Optimization",
                     onAction = {
@@ -137,10 +190,9 @@ fun SetupGuideScreen(
 
             item {
                 SetupStepItem(
-                    title = "3. Device Specific Setup: ${manufacturerGuide.manufacturer}",
-                    description = "Some manufacturers require extra steps to allow background apps.\n\n" +
-                                manufacturerGuide.steps.joinToString("\n") { "• $it" },
-                    isCompleted = false, // We can't automatically verify OEM settings usually
+                    title = "Autostart: ${manufacturerGuide.manufacturer}",
+                    description = manufacturerGuide.steps.joinToString("\n") { "- $it" },
+                    isCompleted = false,
                     actionText = "Open Device Settings",
                     onAction = {
                         BatteryOptimizationHelper.openAutoStartSettings(context)
@@ -149,15 +201,15 @@ fun SetupGuideScreen(
             }
 
             item {
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 Button(
                     onClick = onSetupComplete,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),
-                    enabled = hasRequiredPermissions 
+                    enabled = hasRequiredPermissions
                 ) {
-                    Text("Complete Setup")
+                    Text("Done")
                 }
             }
         }
@@ -190,33 +242,24 @@ fun SetupStepItem(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )
-                
-                if (isCompleted) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Completed",
-                        tint = Color(0xFF00E676)
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "Needs Action",
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                }
+
+                Icon(
+                    imageVector = if (isCompleted) Icons.Default.CheckCircle else Icons.Default.Warning,
+                    contentDescription = if (isCompleted) "Ready" else "Needs action",
+                    tint = if (isCompleted) Color(0xFF00C853) else MaterialTheme.colorScheme.error
+                )
             }
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
+
             if (!isCompleted) {
+                Spacer(modifier = Modifier.height(16.dp))
                 Button(onClick = onAction) {
                     Text(actionText)
                 }

@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -84,12 +85,15 @@ fun HomeScreen(
     onNavigateToPrivateTalk: () -> Unit,
     onNavigateToAdmin: () -> Unit,
     onNavigateToUserList: () -> Unit,
+    onNavigateToSetupCheck: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
+    val serverHealthStatus by viewModel.serverHealthStatus.collectAsState()
     val currentChannel by viewModel.currentChannel.collectAsState()
+    val channels by viewModel.channels.collectAsState()
     val floorState by viewModel.floorState.collectAsState()
     val currentSpeaker by viewModel.currentSpeaker.collectAsState()
     val onlineUsers by viewModel.onlineUsers.collectAsState()
@@ -172,6 +176,9 @@ fun HomeScreen(
                         containerColor = MaterialTheme.colorScheme.background
                     ),
                     actions = {
+                        IconButton(onClick = onNavigateToSetupCheck) {
+                            Icon(Icons.Default.Warning, contentDescription = "Setup check")
+                        }
                         IconButton(onClick = { showNameDialog = true }) {
                             Icon(Icons.Default.Edit, contentDescription = "Edit device name")
                         }
@@ -182,7 +189,10 @@ fun HomeScreen(
                         }
                     }
                 )
-                StatusBar(connectionState = connectionState)
+                StatusBar(
+                    connectionState = connectionState,
+                    serverHealthStatus = serverHealthStatus
+                )
             }
         }
     ) { paddingValues ->
@@ -247,6 +257,36 @@ fun HomeScreen(
                         fontWeight = FontWeight.Bold
                     )
                 }
+            }
+
+            if (channels.size > 1) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(channels) { channel ->
+                        val selected = channel.id == currentChannel?.id
+                        Button(
+                            onClick = { viewModel.selectChannel(channel) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                contentColor = if (selected) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        ) {
+                            Text(channel.name)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
             // Now Talking Indicator

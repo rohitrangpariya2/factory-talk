@@ -43,7 +43,10 @@ class SignalingClient {
                 reconnection = true
                 reconnectionAttempts = Int.MAX_VALUE
                 reconnectionDelay = 1000
-                reconnectionDelayMax = 5000
+                reconnectionDelayMax = 15000
+                randomizationFactor = 0.5
+                timeout = 30000
+                transports = arrayOf("websocket")
             }
 
             socket = IO.socket(URI.create(serverUrl), options).apply {
@@ -51,8 +54,8 @@ class SignalingClient {
                     _connectionState.value = ConnectionState.CONNECTED
                     _events.tryEmit(SignalingEvent.Connected) 
                 }
-                on(Socket.EVENT_DISCONNECT) { 
-                    _connectionState.value = ConnectionState.DISCONNECTED
+                on(Socket.EVENT_DISCONNECT) {
+                    _connectionState.value = ConnectionState.RECONNECTING
                     _events.tryEmit(SignalingEvent.Disconnected) 
                 }
                 on(Socket.EVENT_CONNECT_ERROR) { args ->

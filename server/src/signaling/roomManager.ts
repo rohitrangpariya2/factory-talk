@@ -79,6 +79,8 @@ export function getSocketIdByUserId(userId: string): string | undefined {
   return userSockets.get(userId);
 }
 
-export function removeUserSocket(userId: string): void {
-  userSockets.delete(userId);
+export function removeUserSocket(userId: string, socketId?: string): void {
+  if (!socketId || userSockets.get(userId) === socketId) {
+    userSockets.delete(userId);
+  }
 }

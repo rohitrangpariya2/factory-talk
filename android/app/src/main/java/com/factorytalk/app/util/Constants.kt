@@ -14,6 +14,9 @@ object Constants {
     // Server Configuration
     // Changed for physical device testing
     const val SERVER_URL = BuildConfig.SERVER_URL
+    const val SERVER_HEALTH_TIMEOUT_MS = 10_000
+    const val SERVER_KEEP_ALIVE_INTERVAL_MS = 3 * 60 * 1000L
+    const val SERVICE_WATCHDOG_INTERVAL_MS = 2 * 60 * 1000L
     
     // Notification Channels
     const val NOTIFICATION_CHANNEL_PTT_SERVICE = "ptt_service_channel"
@@ -28,6 +31,8 @@ object Constants {
     // Service Actions
     const val ACTION_START_SERVICE = "com.factorytalk.app.action.START_SERVICE"
     const val ACTION_STOP_SERVICE = "com.factorytalk.app.action.STOP_SERVICE"
+    const val ACTION_RESTART_SERVICE = "com.factorytalk.app.action.RESTART_SERVICE"
+    const val ACTION_SERVICE_WATCHDOG = "com.factorytalk.app.action.SERVICE_WATCHDOG"
     const val ACTION_REFRESH_IDENTITY = "com.factorytalk.app.action.REFRESH_IDENTITY"
     const val ACTION_START_TALKING = "com.factorytalk.app.action.START_TALKING"
     const val ACTION_STOP_TALKING = "com.factorytalk.app.action.STOP_TALKING"
@@ -45,6 +50,7 @@ object Constants {
     const val PREF_IS_FIRST_LAUNCH = "is_first_launch"
     const val PREF_BATTERY_OPTIMIZATION_SKIPPED = "battery_optimization_skipped"
     const val PREF_DEVICE_NAME = "device_name"
+    const val PREF_DEMO_CHANNELS = "demo_channels"
     
     // PTT Config
     const val MAX_TALK_DURATION_SECONDS = 60

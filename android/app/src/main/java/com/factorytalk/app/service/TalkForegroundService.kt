@@ -3,7 +3,6 @@ package com.factorytalk.app.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.AlarmManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -12,7 +11,6 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.factorytalk.app.MainActivity
@@ -22,6 +20,8 @@ import com.factorytalk.app.audio.FloorControlManager
 import com.factorytalk.app.audio.RelayAudioManager
 import com.factorytalk.app.audio.WebRTCManager
 import com.factorytalk.app.data.model.UserRole
+import com.factorytalk.app.data.model.ServerHealthStatus
+import com.factorytalk.app.data.remote.ServerHealthMonitor
 import com.factorytalk.app.data.remote.SignalingClient
 import com.factorytalk.app.data.repository.AuthRepository
 import com.factorytalk.app.data.repository.UserRepository
@@ -47,6 +47,7 @@ class TalkForegroundService : Service() {
     @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var userRepository: UserRepository
     @Inject lateinit var connectionWatchdog: ConnectionWatchdog
+    @Inject lateinit var serverHealthMonitor: ServerHealthMonitor
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var wakeLock: PowerManager.WakeLock? = null
@@ -56,6 +57,9 @@ class TalkForegroundService : Service() {
     private var currentUserId: String? = null
     private var currentUserName: String? = null
     private var currentUserRole: UserRole = UserRole.WORKER
+    private var statusJob: Job? = null
+    private var isTalking = false
+    private var explicitStopRequested = false
 
     override fun onCreate() {
         super.onCreate()
@@ -75,15 +79,19 @@ class TalkForegroundService : Service() {
             startForegroundServiceWithNotification()
             isServiceRunning = true
             connectionWatchdog.start()
+            serverHealthMonitor.start(Constants.SERVER_URL)
+            observeServerStatus()
             initializeSignaling()
+            ServiceRestartScheduler.scheduleWatchdog(this)
         }
         
         when (action) {
             Constants.ACTION_START_SERVICE -> {
                 // Just starting normally
-                updateNotification("Connected - Listening")
+                updateNotification("Connecting...")
             }
             Constants.ACTION_STOP_SERVICE -> {
+                explicitStopRequested = true
                 stopForegroundService()
             }
             Constants.ACTION_REFRESH_IDENTITY -> {
@@ -122,6 +130,7 @@ class TalkForegroundService : Service() {
                 updateNotification("Idle")
             }
             Constants.ACTION_START_TALKING -> {
+                isTalking = true
                 targetUserId = intent.getStringExtra(Constants.EXTRA_TARGET_USER_ID) ?: targetUserId
                 currentChannelId?.let { 
                     if (Constants.DEMO_MODE && currentUserId != null && currentUserName != null) {
@@ -140,6 +149,7 @@ class TalkForegroundService : Service() {
                 }
             }
             Constants.ACTION_STOP_TALKING -> {
+                isTalking = false
                 currentChannelId?.let { 
                     floorControlManager.releaseFloor(it) 
                     relayAudioManager.stopBroadcast()
@@ -182,8 +192,34 @@ class TalkForegroundService : Service() {
         }
     }
 
+    private fun observeServerStatus() {
+        if (statusJob?.isActive == true) return
+        statusJob = serviceScope.launch {
+            serverHealthMonitor.status.collect { status ->
+                if (isTalking) return@collect
+                val message = when (status) {
+                    ServerHealthStatus.CHECKING -> "Connecting... waking server"
+                    ServerHealthStatus.OFFLINE -> "Server sleeping/offline - retrying"
+                    ServerHealthStatus.AWAKE -> {
+                        if (signalingClient.connectionState.value == com.factorytalk.app.data.model.ConnectionState.CONNECTED) {
+                            "Connected - Listening"
+                        } else {
+                            "Server awake - connecting"
+                        }
+                    }
+                    ServerHealthStatus.UNKNOWN -> "Connecting..."
+                }
+                updateNotification(message)
+            }
+        }
+    }
+
     private fun handleSignalingEvent(event: com.factorytalk.app.data.remote.SignalingEvent, currentUserId: String) {
         when (event) {
+            is com.factorytalk.app.data.remote.SignalingEvent.Connected -> {
+                currentChannelId?.let { signalingClient.joinChannel(it) }
+                updateNotification("Connected - Listening")
+            }
             is com.factorytalk.app.data.remote.SignalingEvent.FloorGranted -> {
                 floorControlManager.handleFloorGranted(
                     userId = event.userId,
@@ -269,7 +305,7 @@ class TalkForegroundService : Service() {
             }
             is com.factorytalk.app.data.remote.SignalingEvent.AudioChunkReceived -> {
                 if (event.fromUserId != currentUserId) {
-                    relayAudioManager.playChunk(event.audio, event.sampleRate)
+                    relayAudioManager.playChunk(event.audio, event.sampleRate, event.sequence)
                 }
             }
             is com.factorytalk.app.data.remote.SignalingEvent.Disconnected -> {
@@ -315,13 +351,27 @@ class TalkForegroundService : Service() {
             },
             PendingIntent.FLAG_IMMUTABLE
         )
+        val restartPendingIntent = PendingIntent.getBroadcast(
+            this,
+            3001,
+            Intent(this, StartupReceiver::class.java).apply {
+                action = Constants.ACTION_RESTART_SERVICE
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         return NotificationCompat.Builder(this, Constants.NOTIFICATION_CHANNEL_PTT_SERVICE)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("Factory Talk")
             .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOngoing(true)
+            .setAutoCancel(false)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setDeleteIntent(restartPendingIntent)
             .setContentIntent(pendingIntent)
             .build()
     }
@@ -342,13 +392,8 @@ class TalkForegroundService : Service() {
 
     private fun stopForegroundService() {
         isServiceRunning = false
-        if (wakeLock?.isHeld == true) wakeLock?.release()
-        connectionWatchdog.stop()
-        signalingClient.disconnect()
-        relayAudioManager.stopBroadcast()
-        webRTCManager.dispose()
-        audioRouteManager.abandonAudioFocus()
-        
+        cleanupRuntimeResources()
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -357,30 +402,35 @@ class TalkForegroundService : Service() {
         stopSelf()
     }
 
+    private fun cleanupRuntimeResources() {
+        statusJob?.cancel()
+        statusJob = null
+        if (wakeLock?.isHeld == true) wakeLock?.release()
+        runCatching { connectionWatchdog.stop() }
+        serverHealthMonitor.stop()
+        signalingClient.disconnect()
+        relayAudioManager.stopBroadcast()
+        webRTCManager.dispose()
+        audioRouteManager.abandonAudioFocus()
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        val restartIntent = Intent(applicationContext, TalkForegroundService::class.java).apply {
-            action = Constants.ACTION_START_SERVICE
-            setPackage(packageName)
-        }
-        val restartPendingIntent = PendingIntent.getService(
-            applicationContext,
-            2001,
-            restartIntent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarmManager.set(
-            AlarmManager.ELAPSED_REALTIME,
-            SystemClock.elapsedRealtime() + 1500L,
-            restartPendingIntent
-        )
+        scheduleServiceRestart()
+    }
+
+    private fun scheduleServiceRestart() {
+        ServiceRestartScheduler.scheduleRestart(applicationContext)
+        ServiceRestartScheduler.scheduleWatchdog(applicationContext)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        stopForegroundService()
+        cleanupRuntimeResources()
+        if (!explicitStopRequested) {
+            scheduleServiceRestart()
+        }
     }
 }

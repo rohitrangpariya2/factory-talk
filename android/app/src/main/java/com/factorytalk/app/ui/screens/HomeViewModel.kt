@@ -11,8 +11,10 @@ import com.factorytalk.app.data.model.User
 import com.factorytalk.app.data.model.UserRole
 import com.factorytalk.app.data.remote.SignalingClient
 import com.factorytalk.app.data.remote.SignalingEvent
+import com.factorytalk.app.data.remote.ServerHealthMonitor
 import com.factorytalk.app.data.repository.ChannelRepository
 import com.factorytalk.app.data.repository.UserRepository
+import com.factorytalk.app.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -29,7 +31,8 @@ class HomeViewModel @Inject constructor(
     private val userRepository: UserRepository,
     private val channelRepository: ChannelRepository,
     private val signalingClient: SignalingClient,
-    private val floorControlManager: FloorControlManager
+    private val floorControlManager: FloorControlManager,
+    private val serverHealthMonitor: ServerHealthMonitor
 ) : ViewModel() {
 
     val currentUser = userRepository.getCurrentUser()
@@ -37,6 +40,7 @@ class HomeViewModel @Inject constructor(
 
     val connectionState = signalingClient.connectionState
     val floorState = floorControlManager.floorState
+    val serverHealthStatus = serverHealthMonitor.status
     val currentSpeaker = floorControlManager.currentSpeaker
     val talkDurationSeconds = floorControlManager.talkDurationSeconds
 
@@ -46,8 +50,11 @@ class HomeViewModel @Inject constructor(
 
     private val _currentChannel = MutableStateFlow<Channel?>(null)
     val currentChannel: StateFlow<Channel?> = _currentChannel.asStateFlow()
+    private val _channels = MutableStateFlow<List<Channel>>(emptyList())
+    val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
 
     init {
+        serverHealthMonitor.start(Constants.SERVER_URL)
         loadData()
     }
 
@@ -55,6 +62,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             // Get channels
             channelRepository.getChannels().collect { channels ->
+                _channels.value = channels
                 // Default to first channel, which should be COMMON
                 val commonChannel = channels.find { it.type == com.factorytalk.app.data.model.ChannelType.COMMON }
                     ?: channels.firstOrNull()
@@ -144,6 +152,10 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             userRepository.updateProfile(cleanedName)
         }
+    }
+
+    fun selectChannel(channel: Channel) {
+        _currentChannel.value = channel
     }
     
     fun sendEmergencyBroadcast() {

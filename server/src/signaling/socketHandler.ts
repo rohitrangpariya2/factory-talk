@@ -3,7 +3,7 @@ import { ConnectedUser, UserRole } from '../types';
 import { auth } from '../config/firebase';
 import { env } from '../config/env';
 import { getUserById, updateUserOnlineStatus, updateFcmToken, getOfflineMemberTokens } from '../services/userService';
-import { joinChannel, leaveChannel, leaveAllChannels, getChannelMembers, getSocketIdByUserId, removeUserSocket } from './roomManager';
+import { joinChannel, leaveChannel, leaveAllChannels, getChannelMembers, getSocketIdByUserId, removeUserSocket, isUserInChannel } from './roomManager';
 import { requestFloor, releaseFloor, getFloorState, checkFloorTimeouts } from './floorControl';
 import { sendBroadcastWakeUp } from '../services/fcmService';
 import { logTalkStart, logTalkEnd } from '../services/logService';
@@ -102,7 +102,9 @@ export function setupSocketHandler(io: Server) {
         io.to(channelId).emit('floor_released');
       }
       
-      socket.to(channelId).emit('user_left', { userId: user.userId });
+      if (!isUserInChannel(channelId, user.userId)) {
+        socket.to(channelId).emit('user_left', { userId: user.userId });
+      }
     });
 
     socket.on('request_floor', async (channelId: string) => {
@@ -164,7 +166,7 @@ export function setupSocketHandler(io: Server) {
     socket.on('disconnect', async () => {
       console.log(`User disconnected: ${user.userName}`);
       const leftChannels = leaveAllChannels(socket.id);
-      removeUserSocket(user.userId);
+      removeUserSocket(user.userId, socket.id);
       
       for (const channelId of leftChannels) {
         if (releaseFloor(channelId, socket.id)) {
@@ -173,7 +175,9 @@ export function setupSocketHandler(io: Server) {
             await logTalkEnd(socket.data.currentLogId, Date.now());
           }
         }
-        io.to(channelId).emit('user_left', { userId: user.userId });
+        if (!isUserInChannel(channelId, user.userId)) {
+          io.to(channelId).emit('user_left', { userId: user.userId });
+        }
       }
 
       if (!user.isDeviceAuth) {

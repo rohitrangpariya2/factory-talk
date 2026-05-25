@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
-import android.media.AudioManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
@@ -16,11 +15,12 @@ import android.util.Base64
 import androidx.core.content.ContextCompat
 import com.factorytalk.app.data.remote.SignalingClient
 import com.factorytalk.app.util.CallStateHelper
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -29,7 +29,8 @@ import javax.inject.Singleton
 @Singleton
 class RelayAudioManager @Inject constructor(
     private val context: Context,
-    private val signalingClient: SignalingClient
+    private val signalingClient: SignalingClient,
+    private val audioRouteManager: AudioRouteManager
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var recordingJob: Job? = null
@@ -37,9 +38,13 @@ class RelayAudioManager @Inject constructor(
     private var playbackTrack: AudioTrack? = null
     private var isRecording = false
     private var sequence = 0
-    private val playbackQueue = Channel<ByteArray>(capacity = Channel.UNLIMITED)
+    private var lastPlaybackSequence = -1
+    private val playbackQueue = Channel<ByteArray>(
+        capacity = 8,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
 
-    private val sampleRate = 16000
+    private val sampleRate = 24000
     private val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
     private val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
@@ -53,7 +58,7 @@ class RelayAudioManager @Inject constructor(
 
         val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfigIn, audioFormat)
         val recorderBufferSize = maxOf(minBuffer * 2, 2048)
-        val chunkSize = 640 // 20 ms of 16 kHz mono PCM16 audio.
+        val chunkSize = sampleRate / 50 * 2 // 20 ms of mono PCM16 audio.
         sequence = 0
 
         recordingJob = scope.launch {
@@ -91,23 +96,36 @@ class RelayAudioManager @Inject constructor(
         isRecording = false
     }
 
-    fun playChunk(encodedAudio: String, incomingSampleRate: Int = sampleRate) {
+    fun playChunk(encodedAudio: String, incomingSampleRate: Int = sampleRate, incomingSequence: Int = 0) {
         if (isRecording) return
         if (CallStateHelper.isPhoneCallActive(context)) return
+        if (incomingSequence == 0) {
+            lastPlaybackSequence = -1
+            clearPlaybackQueue()
+        }
+        if (incomingSequence <= lastPlaybackSequence) return
 
         val audio = Base64.decode(encodedAudio, Base64.NO_WRAP)
         ensurePlayback(incomingSampleRate)
+        lastPlaybackSequence = incomingSequence
         playbackQueue.trySend(audio)
+    }
+
+    private fun clearPlaybackQueue() {
+        while (playbackQueue.tryReceive().isSuccess) {
+            // Drop stale audio so the next talk starts immediately.
+        }
     }
 
     private fun ensurePlayback(incomingSampleRate: Int) {
         if (playbackJob?.isActive == true) return
 
         val minBuffer = AudioTrack.getMinBufferSize(incomingSampleRate, channelConfigOut, audioFormat)
+        val preferredOutput = audioRouteManager.prepareForPlayback()
         playbackTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -118,17 +136,18 @@ class RelayAudioManager @Inject constructor(
                     .setChannelMask(channelConfigOut)
                     .build()
             )
-            .setBufferSizeInBytes(maxOf(minBuffer * 4, 4096))
+            .setBufferSizeInBytes(maxOf(minBuffer * 2, sampleRate / 25 * 2))
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
+            .apply {
+                preferredOutput?.let { setPreferredDevice(it) }
+            }
 
         playbackJob = scope.launch {
             val track = playbackTrack ?: return@launch
             try {
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
                 track.play()
-                track.setVolume(0.75f)
+                track.setVolume(1.0f)
                 for (chunk in playbackQueue) {
                     track.write(chunk, 0, chunk.size)
                 }

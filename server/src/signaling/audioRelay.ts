@@ -29,7 +29,7 @@ export function buildAudioRelayEvent(
     channelId: payload.channelId,
     targetUserId: payload.targetUserId,
     audio: payload.audio,
-    sampleRate: payload.sampleRate || 16000,
+    sampleRate: payload.sampleRate || 24000,
     sequence: payload.sequence || 0,
     fromUserId: sender.userId,
     fromUserName: sender.userName

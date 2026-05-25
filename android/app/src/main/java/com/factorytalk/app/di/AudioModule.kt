@@ -33,9 +33,10 @@ object AudioModule {
     @Singleton
     fun provideRelayAudioManager(
         @ApplicationContext context: Context,
-        signalingClient: SignalingClient
+        signalingClient: SignalingClient,
+        audioRouteManager: AudioRouteManager
     ): RelayAudioManager {
-        return RelayAudioManager(context, signalingClient)
+        return RelayAudioManager(context, signalingClient, audioRouteManager)
     }
 
     @Provides
