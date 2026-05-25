@@ -62,6 +62,7 @@ object Constants {
     const val PREF_LAST_LOCATION_SENT_AT = "last_location_sent_at"
     const val PREF_LAST_LOCATION_LATITUDE = "last_location_latitude"
     const val PREF_LAST_LOCATION_LONGITUDE = "last_location_longitude"
+    const val PREF_LOCATION_STATUS = "location_status"
     const val PREF_DEVICE_IS_ADMIN = "device_is_admin"
     const val PREF_ADMIN_PIN = "admin_pin"
     const val DEFAULT_ADMIN_PIN = "1234"

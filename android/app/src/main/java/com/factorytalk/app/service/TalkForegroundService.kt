@@ -262,6 +262,7 @@ class TalkForegroundService : Service() {
                     startLocationUpdates()
                     sendLastKnownLocation()
                 } else {
+                    if (enabled) updateLocationStatus("Location permission missing")
                     stopLocationUpdates()
                 }
                 delay(15_000L)
@@ -274,7 +275,12 @@ class TalkForegroundService : Service() {
         val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
             .filter { provider -> runCatching { locationManager.isProviderEnabled(provider) }.getOrDefault(false) }
-        if (providers.isEmpty()) return
+        loadLastKnownLocation(locationManager)
+        if (providers.isEmpty()) {
+            updateLocationStatus("Phone Location/GPS is OFF")
+            sendLastKnownLocation()
+            return
+        }
 
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
@@ -288,21 +294,31 @@ class TalkForegroundService : Service() {
         }
         try {
             locationListener = listener
-            providers.forEach { provider ->
-                locationManager.getLastKnownLocation(provider)?.let { location ->
-                    if (lastKnownLocation == null || location.time >= (lastKnownLocation?.time ?: 0L)) {
-                        lastKnownLocation = location
-                    }
-                }
-            }
+            loadLastKnownLocation(locationManager)
             sendLastKnownLocation()
             providers.forEach { provider ->
+                runCatching {
+                    locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
+                }
                 locationManager.requestLocationUpdates(provider, 10_000L, 0f, listener, Looper.getMainLooper())
             }
+            if (lastKnownLocation == null) updateLocationStatus("Waiting for GPS/location fix")
         } catch (e: SecurityException) {
             locationListener = null
+            updateLocationStatus("Location permission missing")
         } catch (e: IllegalArgumentException) {
             locationListener = null
+            updateLocationStatus("Location provider error")
+        }
+    }
+
+    private fun loadLastKnownLocation(locationManager: LocationManager) {
+        locationManager.getProviders(true).forEach { provider ->
+            runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()?.let { location ->
+                if (lastKnownLocation == null || location.time >= (lastKnownLocation?.time ?: 0L)) {
+                    lastKnownLocation = location
+                }
+            }
         }
     }
 
@@ -321,6 +337,14 @@ class TalkForegroundService : Service() {
             .putLong(Constants.PREF_LAST_LOCATION_SENT_AT, System.currentTimeMillis())
             .putString(Constants.PREF_LAST_LOCATION_LATITUDE, location.latitude.toString())
             .putString(Constants.PREF_LAST_LOCATION_LONGITUDE, location.longitude.toString())
+            .putString(Constants.PREF_LOCATION_STATUS, "Location sent")
+            .apply()
+    }
+
+    private fun updateLocationStatus(status: String) {
+        getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(Constants.PREF_LOCATION_STATUS, status)
             .apply()
     }
 

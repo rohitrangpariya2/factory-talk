@@ -2,6 +2,7 @@ package com.factorytalk.app.ui.screens
 
 import android.app.Activity
 import android.content.Intent
+import android.provider.Settings
 import android.os.Build
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -88,6 +89,7 @@ fun SetupGuideScreen(
     var allowAudioDuringCall by remember { mutableStateOf(false) }
     var locationSharingEnabled by remember { mutableStateOf(false) }
     var lastLocationSentAt by remember { mutableStateOf(0L) }
+    var locationStatus by remember { mutableStateOf("") }
     val connectionState by viewModel.connectionState.collectAsState()
     val serverHealthStatus by viewModel.serverHealthStatus.collectAsState()
 
@@ -107,6 +109,9 @@ fun SetupGuideScreen(
                 lastLocationSentAt = context
                     .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
                     .getLong(Constants.PREF_LAST_LOCATION_SENT_AT, 0L)
+                locationStatus = context
+                    .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                    .getString(Constants.PREF_LOCATION_STATUS, "") ?: ""
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -229,7 +234,8 @@ fun SetupGuideScreen(
                                     if (lastLocationSentAt > 0L) {
                                         "Last location sent: ${formatSetupTime(lastLocationSentAt)}"
                                     } else {
-                                        "ON che, pan location haju send nathi thayu. Phone Location/GPS ON karo ane app 30 sec khulli rakho."
+                                        val status = locationStatus.ifBlank { "Waiting for GPS/location fix" }
+                                        "$status. Phone Location/GPS ON karo, Location permission allow karo ane app 30 sec khulli rakho."
                                     }
                                 } else {
                                     "OFF hoy tyare admin ne aa phone nu location moklavama nahi ave."
@@ -275,6 +281,19 @@ fun SetupGuideScreen(
                                 }
                             }
                         )
+                    }
+                }
+            }
+
+            item {
+                if (locationSharingEnabled && lastLocationSentAt == 0L) {
+                    Button(
+                        onClick = {
+                            context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Open Phone Location Settings")
                     }
                 }
             }
