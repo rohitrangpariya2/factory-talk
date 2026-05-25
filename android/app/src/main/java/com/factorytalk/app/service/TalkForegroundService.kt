@@ -14,6 +14,7 @@ import android.location.LocationManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -284,7 +285,7 @@ class TalkForegroundService : Service() {
             locationManager.getLastKnownLocation(provider)?.let {
                 signalingClient.sendLocation(it.latitude, it.longitude)
             }
-            locationManager.requestLocationUpdates(provider, 30_000L, 25f, listener)
+            locationManager.requestLocationUpdates(provider, 30_000L, 25f, listener, Looper.getMainLooper())
         } catch (e: SecurityException) {
             locationListener = null
         } catch (e: IllegalArgumentException) {
