@@ -50,9 +50,13 @@ import com.factorytalk.app.service.TalkForegroundService
 import com.factorytalk.app.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -97,8 +101,31 @@ class AdminViewModel @Inject constructor(
         viewModelScope.launch {
             while (true) {
                 signalingClient.requestLocations()
+                fetchLocationSnapshot()
                 delay(5_000L)
             }
+        }
+    }
+
+    private suspend fun fetchLocationSnapshot() {
+        runCatching {
+            val json = withContext(Dispatchers.IO) {
+                val connection = URL(Constants.SERVER_URL.trimEnd('/') + "/locations").openConnection() as HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.connectTimeout = Constants.SERVER_HEALTH_TIMEOUT_MS
+                connection.readTimeout = Constants.SERVER_HEALTH_TIMEOUT_MS
+                connection.useCaches = false
+                try {
+                    if (connection.responseCode in 200..299) {
+                        connection.inputStream.bufferedReader().use { it.readText() }
+                    } else {
+                        ""
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            }
+            if (json.isNotBlank()) signalingClient.applyLocationSnapshot(json)
         }
     }
 }

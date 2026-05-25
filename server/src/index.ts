@@ -8,7 +8,7 @@ import './config/firebase'; // Initialize Firebase
 import authRoutes from './api/routes/auth';
 import userRoutes from './api/routes/users';
 import channelRoutes from './api/routes/channels';
-import { setupSocketHandler } from './signaling/socketHandler';
+import { getLatestLocations, setupSocketHandler } from './signaling/socketHandler';
 
 const app = express();
 const server = http.createServer(app);
@@ -25,6 +25,10 @@ app.use('/api/channels', channelRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
+});
+
+app.get('/locations', (req, res) => {
+  res.status(200).json({ locations: getLatestLocations() });
 });
 
 // Socket.IO

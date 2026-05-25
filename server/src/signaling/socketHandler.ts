@@ -19,6 +19,10 @@ const latestLocations = new Map<string, {
   locationUpdatedAt: number;
 }>();
 
+export function getLatestLocations() {
+  return Array.from(latestLocations.values());
+}
+
 export function setupSocketHandler(io: Server) {
   
   // Auth Middleware

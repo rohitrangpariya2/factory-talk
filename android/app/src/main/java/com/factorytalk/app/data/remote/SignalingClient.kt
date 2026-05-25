@@ -311,6 +311,14 @@ class SignalingClient(
         socket?.emit("request_locations")
     }
 
+    fun applyLocationSnapshot(json: String) {
+        val data = JSONObject(json)
+        val locations = data.optJSONArray("locations") ?: JSONArray()
+        for (i in 0 until locations.length()) {
+            applyLocationJson(locations.getJSONObject(i))
+        }
+    }
+
     private fun applyLocationJson(data: JSONObject) {
         val userId = data.optString("userId").ifBlank { return }
         val latitude = data.optNullableDouble("latitude")
