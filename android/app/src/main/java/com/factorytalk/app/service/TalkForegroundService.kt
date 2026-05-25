@@ -272,24 +272,33 @@ class TalkForegroundService : Service() {
     private fun startLocationUpdates() {
         if (locationListener != null) return
         val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val provider = when {
-            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-            locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-            else -> return
-        }
+        val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            .filter { provider -> runCatching { locationManager.isProviderEnabled(provider) }.getOrDefault(false) }
+        if (providers.isEmpty()) return
+
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                lastKnownLocation = location
+                if (lastKnownLocation == null || location.accuracy <= (lastKnownLocation?.accuracy ?: Float.MAX_VALUE)) {
+                    lastKnownLocation = location
+                } else {
+                    lastKnownLocation = location
+                }
                 sendLastKnownLocation()
             }
         }
         try {
             locationListener = listener
-            locationManager.getLastKnownLocation(provider)?.let {
-                lastKnownLocation = it
-                sendLastKnownLocation()
+            providers.forEach { provider ->
+                locationManager.getLastKnownLocation(provider)?.let { location ->
+                    if (lastKnownLocation == null || location.time >= (lastKnownLocation?.time ?: 0L)) {
+                        lastKnownLocation = location
+                    }
+                }
             }
-            locationManager.requestLocationUpdates(provider, 30_000L, 25f, listener, Looper.getMainLooper())
+            sendLastKnownLocation()
+            providers.forEach { provider ->
+                locationManager.requestLocationUpdates(provider, 10_000L, 0f, listener, Looper.getMainLooper())
+            }
         } catch (e: SecurityException) {
             locationListener = null
         } catch (e: IllegalArgumentException) {
