@@ -31,6 +31,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.factorytalk.app.data.model.FloorState
 import com.factorytalk.app.service.TalkForegroundService
 import com.factorytalk.app.ui.components.TalkButton
+import com.factorytalk.app.util.CallStateHelper
 import com.factorytalk.app.util.Constants
 
 @Composable
@@ -100,6 +101,10 @@ fun PrivateTalkScreen(
             floorState = if (selectedUserId == null) FloorState.Denied("Select user") else floorState,
             remainingSeconds = talkDuration,
             onPressStart = {
+                if (CallStateHelper.isPhoneCallActive(context)) {
+                    android.widget.Toast.makeText(context, "Phone call is active", android.widget.Toast.LENGTH_SHORT).show()
+                    return@TalkButton
+                }
                 val channelId = currentChannel?.id ?: Constants.DEMO_CHANNEL_ID
                 val targetId = selectedUserId ?: return@TalkButton
                 context.startService(Intent(context, TalkForegroundService::class.java).apply {

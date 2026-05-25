@@ -74,6 +74,7 @@ import com.factorytalk.app.ui.components.RoleBadge
 import com.factorytalk.app.ui.components.StatusBar
 import com.factorytalk.app.ui.components.TalkButton
 import com.factorytalk.app.ui.theme.OnlineGreen
+import com.factorytalk.app.util.CallStateHelper
 import com.factorytalk.app.util.Constants
 import com.factorytalk.app.util.PermissionHelper
 
@@ -410,6 +411,10 @@ fun HomeScreen(
                 remainingSeconds = talkDuration,
                 onPressStart = {
                     android.util.Log.d("HomeScreen", "onPressStart triggered")
+                    if (CallStateHelper.isPhoneCallActive(context)) {
+                        android.widget.Toast.makeText(context, "Phone call is active", android.widget.Toast.LENGTH_SHORT).show()
+                        return@TalkButton
+                    }
                     if (com.factorytalk.app.util.PermissionHelper.hasRecordAudioPermission(context)) {
                         android.util.Log.d("HomeScreen", "Has permission, starting service for ACTION_START_TALKING")
                         val intent = Intent(context, TalkForegroundService::class.java).apply {

@@ -15,6 +15,7 @@ import android.media.audiofx.NoiseSuppressor
 import android.util.Base64
 import androidx.core.content.ContextCompat
 import com.factorytalk.app.data.remote.SignalingClient
+import com.factorytalk.app.util.CallStateHelper
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +46,7 @@ class RelayAudioManager @Inject constructor(
 
     fun startBroadcast(channelId: String, targetUserId: String? = null) {
         if (recordingJob?.isActive == true) return
+        if (CallStateHelper.isPhoneCallActive(context)) return
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return
         }
@@ -91,6 +93,7 @@ class RelayAudioManager @Inject constructor(
 
     fun playChunk(encodedAudio: String, incomingSampleRate: Int = sampleRate) {
         if (isRecording) return
+        if (CallStateHelper.isPhoneCallActive(context)) return
 
         val audio = Base64.decode(encodedAudio, Base64.NO_WRAP)
         ensurePlayback(incomingSampleRate)
