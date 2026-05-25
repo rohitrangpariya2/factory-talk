@@ -15,12 +15,12 @@ android {
         applicationId = "com.factorytalk.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        versionCode = 2
         versionName = "1.0"
         buildConfigField(
             "String",
             "SERVER_URL",
-            "\"${project.findProperty("SERVER_URL") ?: "http://192.168.31.121:3001"}\""
+            "\"${project.findProperty("SERVER_URL") ?: "https://factory-talk-server.onrender.com"}\""
         )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
