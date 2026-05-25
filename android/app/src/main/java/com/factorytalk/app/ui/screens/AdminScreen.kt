@@ -49,6 +49,7 @@ import com.factorytalk.app.service.ReminderScheduler
 import com.factorytalk.app.service.TalkForegroundService
 import com.factorytalk.app.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -90,6 +91,15 @@ class AdminViewModel @Inject constructor(
 
     fun setReminderSchedule(onTime: String, offTime: String) {
         signalingClient.setReminderSchedule(onTime, offTime)
+    }
+
+    init {
+        viewModelScope.launch {
+            while (true) {
+                signalingClient.requestLocations()
+                delay(5_000L)
+            }
+        }
     }
 }
 

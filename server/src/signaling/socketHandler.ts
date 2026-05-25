@@ -10,7 +10,14 @@ import { logTalkStart, logTalkEnd } from '../services/logService';
 import { buildAudioRelayEvent } from './audioRelay';
 
 let reminderSchedule: { onTime: string; offTime: string } | null = null;
-const latestLocations = new Map<string, { latitude: number; longitude: number; locationUpdatedAt: number }>();
+const latestLocations = new Map<string, {
+  userId: string;
+  name: string;
+  role: UserRole;
+  latitude: number;
+  longitude: number;
+  locationUpdatedAt: number;
+}>();
 
 export function setupSocketHandler(io: Server) {
   
@@ -114,6 +121,12 @@ export function setupSocketHandler(io: Server) {
       }
     });
 
+    socket.on('request_locations', () => {
+      socket.emit('location_snapshot', {
+        locations: Array.from(latestLocations.values())
+      });
+    });
+
     socket.on('location_update', (payload) => {
       const latitude = Number(payload?.latitude);
       const longitude = Number(payload?.longitude);
@@ -124,6 +137,9 @@ export function setupSocketHandler(io: Server) {
       user.longitude = longitude;
       user.locationUpdatedAt = Date.now();
       latestLocations.set(user.userId, {
+        userId: user.userId,
+        name: user.userName,
+        role: user.role,
         latitude: user.latitude,
         longitude: user.longitude,
         locationUpdatedAt: user.locationUpdatedAt

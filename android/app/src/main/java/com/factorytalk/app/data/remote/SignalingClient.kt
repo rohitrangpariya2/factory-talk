@@ -175,33 +175,13 @@ class SignalingClient(
                 }
                 on("user_location_updated") { args ->
                     val data = args[0] as JSONObject
-                    val userId = data.getString("userId")
-                    val latitude = data.optNullableDouble("latitude")
-                    val longitude = data.optNullableDouble("longitude")
-                    val updatedAt = data.optLong("locationUpdatedAt", 0L)
-                    val existingUser = onlineUserMap[userId]
-                    if (existingUser != null) {
-                        onlineUserMap[userId] = existingUser.copy(
-                            latitude = latitude,
-                            longitude = longitude,
-                            locationUpdatedAt = updatedAt
-                        )
-                    } else {
-                        val role = runCatching { UserRole.valueOf(data.optString("role", UserRole.WORKER.name)) }
-                            .getOrDefault(UserRole.WORKER)
-                        onlineUserMap[userId] = User(
-                            id = userId,
-                            displayName = data.optString("name", "Factory Phone"),
-                            role = role,
-                            isOnline = true,
-                            latitude = latitude,
-                            longitude = longitude,
-                            locationUpdatedAt = updatedAt
-                        )
-                    }
-                    publishOnlineUsers()
-                    if (latitude != null && longitude != null) {
-                        _events.tryEmit(SignalingEvent.UserLocationUpdated(userId, latitude, longitude, updatedAt))
+                    applyLocationJson(data)
+                }
+                on("location_snapshot") { args ->
+                    val data = args[0] as JSONObject
+                    val locations = data.optJSONArray("locations") ?: JSONArray()
+                    for (i in 0 until locations.length()) {
+                        applyLocationJson(locations.getJSONObject(i))
                     }
                 }
                 on("channel_info") { args ->
@@ -325,6 +305,42 @@ class SignalingClient(
             put("latitude", latitude)
             put("longitude", longitude)
         })
+    }
+
+    fun requestLocations() {
+        socket?.emit("request_locations")
+    }
+
+    private fun applyLocationJson(data: JSONObject) {
+        val userId = data.optString("userId").ifBlank { return }
+        val latitude = data.optNullableDouble("latitude")
+        val longitude = data.optNullableDouble("longitude")
+        val updatedAt = data.optLong("locationUpdatedAt", 0L)
+        val existingUser = onlineUserMap[userId]
+        if (existingUser != null) {
+            onlineUserMap[userId] = existingUser.copy(
+                displayName = data.optString("name", existingUser.displayName),
+                latitude = latitude,
+                longitude = longitude,
+                locationUpdatedAt = updatedAt
+            )
+        } else {
+            val role = runCatching { UserRole.valueOf(data.optString("role", UserRole.WORKER.name)) }
+                .getOrDefault(UserRole.WORKER)
+            onlineUserMap[userId] = User(
+                id = userId,
+                displayName = data.optString("name", "Factory Phone"),
+                role = role,
+                isOnline = true,
+                latitude = latitude,
+                longitude = longitude,
+                locationUpdatedAt = updatedAt
+            )
+        }
+        publishOnlineUsers()
+        if (latitude != null && longitude != null) {
+            _events.tryEmit(SignalingEvent.UserLocationUpdated(userId, latitude, longitude, updatedAt))
+        }
     }
 
     private fun publishOnlineUsers() {

@@ -55,6 +55,9 @@ import com.factorytalk.app.util.PermissionHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
@@ -84,6 +87,7 @@ fun SetupGuideScreen(
     var isIgnoringBattery by remember { mutableStateOf(false) }
     var allowAudioDuringCall by remember { mutableStateOf(false) }
     var locationSharingEnabled by remember { mutableStateOf(false) }
+    var lastLocationSentAt by remember { mutableStateOf(0L) }
     val connectionState by viewModel.connectionState.collectAsState()
     val serverHealthStatus by viewModel.serverHealthStatus.collectAsState()
 
@@ -100,6 +104,9 @@ fun SetupGuideScreen(
                 locationSharingEnabled = context
                     .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
                     .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
+                lastLocationSentAt = context
+                    .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                    .getLong(Constants.PREF_LAST_LOCATION_SENT_AT, 0L)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -219,7 +226,11 @@ fun SetupGuideScreen(
                             Text("Duty location sharing", fontWeight = FontWeight.Bold)
                             Text(
                                 text = if (locationSharingEnabled) {
-                                    "Admin panel ma aa phone nu last location/time dekhase."
+                                    if (lastLocationSentAt > 0L) {
+                                        "Last location sent: ${formatSetupTime(lastLocationSentAt)}"
+                                    } else {
+                                        "ON che, pan location haju send nathi thayu. Phone Location/GPS ON karo ane app 30 sec khulli rakho."
+                                    }
                                 } else {
                                     "OFF hoy tyare admin ne aa phone nu location moklavama nahi ave."
                                 },
@@ -330,6 +341,10 @@ fun SetupGuideScreen(
             }
         }
     }
+}
+
+private fun formatSetupTime(timestamp: Long): String {
+    return SimpleDateFormat("hh:mm:ss a", Locale.getDefault()).format(Date(timestamp))
 }
 
 @Composable
