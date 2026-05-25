@@ -2,6 +2,7 @@ package com.factorytalk.app.data.remote
 
 import android.util.Log
 import com.factorytalk.app.data.model.ConnectionState
+import com.factorytalk.app.data.model.User
 import com.factorytalk.app.data.model.UserRole
 import io.socket.client.IO
 import io.socket.client.Socket
@@ -25,6 +26,9 @@ class SignalingClient {
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    private val onlineUserMap = linkedMapOf<String, User>()
+    private val _onlineUsers = MutableStateFlow<List<User>>(emptyList())
+    val onlineUsers: StateFlow<List<User>> = _onlineUsers.asStateFlow()
 
     fun connect(serverUrl: String, authToken: String?, userId: String, userName: String, role: UserRole) {
         if (socket?.connected() == true) return
@@ -46,7 +50,7 @@ class SignalingClient {
                 reconnectionDelayMax = 15000
                 randomizationFactor = 0.5
                 timeout = 30000
-                transports = arrayOf("websocket")
+                transports = arrayOf("websocket", "polling")
             }
 
             socket = IO.socket(URI.create(serverUrl), options).apply {
@@ -130,6 +134,15 @@ class SignalingClient {
                 // Room Events
                 on("user_joined") { args ->
                     val data = args[0] as JSONObject
+                    val user = User(
+                        id = data.getString("userId"),
+                        displayName = data.getString("name"),
+                        role = UserRole.valueOf(data.optString("role", UserRole.WORKER.name)),
+                        isOnline = true,
+                        isBusy = data.optBoolean("isBusy", false)
+                    )
+                    onlineUserMap[user.id] = user
+                    publishOnlineUsers()
                     _events.tryEmit(SignalingEvent.UserJoined(
                         userId = data.getString("userId"),
                         name = data.getString("name"),
@@ -138,15 +151,31 @@ class SignalingClient {
                 }
                 on("user_left") { args ->
                     val data = args[0] as JSONObject
-                    _events.tryEmit(SignalingEvent.UserLeft(data.getString("userId")))
+                    val userId = data.getString("userId")
+                    onlineUserMap.remove(userId)
+                    publishOnlineUsers()
+                    _events.tryEmit(SignalingEvent.UserLeft(userId))
+                }
+                on("user_status") { args ->
+                    val data = args[0] as JSONObject
+                    val userId = data.getString("userId")
+                    val isBusy = data.optBoolean("isBusy", false)
+                    onlineUserMap[userId]?.let { user ->
+                        onlineUserMap[userId] = user.copy(isBusy = isBusy)
+                        publishOnlineUsers()
+                    }
+                    _events.tryEmit(SignalingEvent.UserStatusChanged(userId, isBusy))
                 }
                 on("channel_info") { args ->
                     val data = args[0] as JSONObject
                     val membersArray = data.getJSONArray("members")
                     val members = mutableListOf<JSONObject>()
                     for (i in 0 until membersArray.length()) {
-                        members.add(membersArray.getJSONObject(i))
+                        val member = membersArray.getJSONObject(i)
+                        members.add(member)
+                        userFromJson(member)?.let { onlineUserMap[it.id] = it }
                     }
+                    publishOnlineUsers()
                     val floorHolder = if (data.isNull("floorHolder")) null else data.getJSONObject("floorHolder")
                     _events.tryEmit(SignalingEvent.ChannelInfo(members, floorHolder))
                 }
@@ -214,6 +243,34 @@ class SignalingClient {
             put("sequence", sequence)
         })
     }
+
+    private fun userFromJson(member: JSONObject): User? {
+        val id = member.optString("userId").ifBlank { return null }
+        val name = member.optString("userName", member.optString("name", "Factory Phone"))
+        val role = runCatching { UserRole.valueOf(member.optString("role", UserRole.WORKER.name)) }
+            .getOrDefault(UserRole.WORKER)
+
+        return User(
+            id = id,
+            displayName = name,
+            role = role,
+            isOnline = true,
+            isBusy = member.optBoolean("isBusy", false)
+        )
+    }
+
+    fun sendUserStatus(isBusy: Boolean) {
+        socket?.emit("user_status", JSONObject().apply {
+            put("isBusy", isBusy)
+        })
+    }
+
+    private fun publishOnlineUsers() {
+        _onlineUsers.value = onlineUserMap.values
+            .filter { it.isOnline }
+            .distinctBy { it.id }
+            .sortedByDescending { it.role.priority }
+    }
 }
 
 sealed class SignalingEvent {
@@ -239,6 +296,7 @@ sealed class SignalingEvent {
     
     data class UserJoined(val userId: String, val name: String, val role: UserRole) : SignalingEvent()
     data class UserLeft(val userId: String) : SignalingEvent()
+    data class UserStatusChanged(val userId: String, val isBusy: Boolean) : SignalingEvent()
     data class ChannelInfo(val members: List<JSONObject>, val floorState: JSONObject?) : SignalingEvent()
     
     data class Error(val message: String) : SignalingEvent()

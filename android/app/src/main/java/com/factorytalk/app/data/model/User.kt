@@ -7,6 +7,7 @@ data class User(
     val role: UserRole = UserRole.WORKER,
     val fcmToken: String? = null,
     val isOnline: Boolean = false,
+    val isBusy: Boolean = false,
     val lastSeen: Long = 0,
     val channels: List<String> = emptyList(),
     val permissions: Permissions = Permissions(),

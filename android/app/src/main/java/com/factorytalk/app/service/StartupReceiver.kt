@@ -9,6 +9,8 @@ import com.factorytalk.app.util.Constants
 class StartupReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(Constants.PREF_WALKIE_ENABLED, true)) return
         if (
             action == Intent.ACTION_BOOT_COMPLETED ||
             action == Intent.ACTION_MY_PACKAGE_REPLACED ||

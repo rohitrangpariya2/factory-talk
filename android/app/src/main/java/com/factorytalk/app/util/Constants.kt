@@ -51,6 +51,8 @@ object Constants {
     const val PREF_BATTERY_OPTIMIZATION_SKIPPED = "battery_optimization_skipped"
     const val PREF_DEVICE_NAME = "device_name"
     const val PREF_DEMO_CHANNELS = "demo_channels"
+    const val PREF_ALLOW_AUDIO_DURING_CALL = "allow_audio_during_call"
+    const val PREF_WALKIE_ENABLED = "walkie_enabled"
     
     // PTT Config
     const val MAX_TALK_DURATION_SECONDS = 60

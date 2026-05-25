@@ -20,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -79,6 +80,7 @@ fun SetupGuideScreen(
     val context = LocalContext.current
     var hasRequiredPermissions by remember { mutableStateOf(false) }
     var isIgnoringBattery by remember { mutableStateOf(false) }
+    var allowAudioDuringCall by remember { mutableStateOf(false) }
     val connectionState by viewModel.connectionState.collectAsState()
     val serverHealthStatus by viewModel.serverHealthStatus.collectAsState()
 
@@ -89,6 +91,9 @@ fun SetupGuideScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasRequiredPermissions = PermissionHelper.getMissingPermissions(context).isEmpty()
                 isIgnoringBattery = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+                allowAudioDuringCall = context
+                    .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                    .getBoolean(Constants.PREF_ALLOW_AUDIO_DURING_CALL, false)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -117,7 +122,7 @@ fun SetupGuideScreen(
         ) {
             item {
                 Text(
-                    text = "Keep every phone green here so Factory Talk can receive even when the app is minimized.",
+                    text = "Keep every phone green here so Factory Talk can receive even when the app is minimized. Phone: ${manufacturerGuide.manufacturer} ${manufacturerGuide.model}",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onBackground
                 )
@@ -155,11 +160,49 @@ fun SetupGuideScreen(
             }
 
             item {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Call time audio", fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (allowAudioDuringCall) {
+                                    "Phone call chalu hoy to pan Factory Talk audio allow."
+                                } else {
+                                    "Phone call chalu hoy tyare Factory Talk audio block."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = allowAudioDuringCall,
+                            onCheckedChange = { checked ->
+                                allowAudioDuringCall = checked
+                                context.getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                                    .edit()
+                                    .putBoolean(Constants.PREF_ALLOW_AUDIO_DURING_CALL, checked)
+                                    .apply()
+                            }
+                        )
+                    }
+                }
+            }
+
+            item {
                 SetupStepItem(
                     title = "App Permissions",
-                    description = "Allow microphone, notifications, network, and Bluetooth permissions.",
+                    description = "Allow Microphone, Notifications, Nearby devices/Bluetooth, and network access.",
                     isCompleted = hasRequiredPermissions,
-                    actionText = "Grant Permissions",
+                    actionText = "Open App Settings",
                     onAction = {
                         val missing = PermissionHelper.getMissingPermissions(context)
                         if (missing.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -170,7 +213,9 @@ fun SetupGuideScreen(
                             }
                             (currentContext as? Activity)?.let {
                                 androidx.core.app.ActivityCompat.requestPermissions(it, missing.toTypedArray(), 100)
-                            }
+                            } ?: BatteryOptimizationHelper.openAppSettings(context)
+                        } else {
+                            BatteryOptimizationHelper.openAppSettings(context)
                         }
                     }
                 )
@@ -190,8 +235,8 @@ fun SetupGuideScreen(
 
             item {
                 SetupStepItem(
-                    title = "Autostart: ${manufacturerGuide.manufacturer}",
-                    description = manufacturerGuide.steps.joinToString("\n") { "- $it" },
+                    title = "Company guide: ${manufacturerGuide.manufacturer} ${manufacturerGuide.model}",
+                    description = manufacturerGuide.steps.joinToString("\n\n") { "- $it" },
                     isCompleted = false,
                     actionText = "Open Device Settings",
                     onAction = {

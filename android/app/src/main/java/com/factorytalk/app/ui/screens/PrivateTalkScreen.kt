@@ -45,6 +45,10 @@ fun PrivateTalkScreen(
     val floorState by viewModel.floorState.collectAsState()
     val talkDuration by viewModel.talkDurationSeconds.collectAsState()
     var selectedUserId by remember { mutableStateOf<String?>(null) }
+    val walkieEnabled = remember {
+        context.getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            .getBoolean(Constants.PREF_WALKIE_ENABLED, true)
+    }
 
     val privateTargets = onlineUsers.filter { it.id != currentUser?.id }
 
@@ -90,7 +94,11 @@ fun PrivateTalkScreen(
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(user.displayName, fontWeight = FontWeight.Bold)
-                            Text(user.role.name, style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                text = if (user.isBusy) "BUSY - Phone call active" else user.role.name,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (user.isBusy) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -101,7 +109,11 @@ fun PrivateTalkScreen(
             floorState = if (selectedUserId == null) FloorState.Denied("Select user") else floorState,
             remainingSeconds = talkDuration,
             onPressStart = {
-                if (CallStateHelper.isPhoneCallActive(context)) {
+                if (!walkieEnabled) {
+                    android.widget.Toast.makeText(context, "Walkie Talkie is OFF", android.widget.Toast.LENGTH_SHORT).show()
+                    return@TalkButton
+                }
+                if (CallStateHelper.shouldBlockAppAudio(context)) {
                     android.widget.Toast.makeText(context, "Phone call is active", android.widget.Toast.LENGTH_SHORT).show()
                     return@TalkButton
                 }

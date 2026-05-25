@@ -25,6 +25,7 @@ export function setupSocketHandler(io: Server) {
           userId: deviceId,
           userName: deviceName,
           role,
+          isBusy: false,
           isDeviceAuth: true
         } as ConnectedUser;
         next();
@@ -42,7 +43,8 @@ export function setupSocketHandler(io: Server) {
         userId: user.id,
         userName: user.displayName,
         role: user.role,
-        fcmToken: user.fcmToken
+        fcmToken: user.fcmToken,
+        isBusy: false
       } as ConnectedUser;
       
       next();
@@ -70,7 +72,18 @@ export function setupSocketHandler(io: Server) {
       const floorState = getFloorState(channelId);
       
       socket.emit('channel_info', { members, floorHolder: floorState.currentSpeaker });
-      socket.to(channelId).emit('user_joined', { userId: user.userId, name: user.userName, role: user.role });
+      socket.to(channelId).emit('user_joined', { userId: user.userId, name: user.userName, role: user.role, isBusy: !!user.isBusy });
+    });
+
+    socket.on('user_status', (payload) => {
+      user.isBusy = !!payload?.isBusy;
+      const channelIds = Array.from(socket.rooms).filter(room => room !== socket.id);
+      for (const channelId of channelIds) {
+        socket.to(channelId).emit('user_status', {
+          userId: user.userId,
+          isBusy: !!user.isBusy
+        });
+      }
     });
 
     socket.on('audio_chunk', (payload) => {

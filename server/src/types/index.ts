@@ -67,6 +67,7 @@ export interface ConnectedUser {
   role: UserRole;
   fcmToken?: string;
   isDeviceAuth?: boolean;
+  isBusy?: boolean;
 }
 
 export interface TalkLog {

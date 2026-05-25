@@ -9,7 +9,6 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
 import android.util.Base64
 import androidx.core.content.ContextCompat
@@ -44,14 +43,14 @@ class RelayAudioManager @Inject constructor(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    private val sampleRate = 24000
+    private val sampleRate = 16000
     private val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
     private val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
 
     fun startBroadcast(channelId: String, targetUserId: String? = null) {
         if (recordingJob?.isActive == true) return
-        if (CallStateHelper.isPhoneCallActive(context)) return
+        if (CallStateHelper.shouldBlockAppAudio(context)) return
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return
         }
@@ -63,7 +62,7 @@ class RelayAudioManager @Inject constructor(
 
         recordingJob = scope.launch {
             val recorder = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 sampleRate,
                 channelConfigIn,
                 audioFormat,
@@ -78,7 +77,8 @@ class RelayAudioManager @Inject constructor(
                 while (isActive) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
-                        val encoded = Base64.encodeToString(buffer.copyOf(read), Base64.NO_WRAP)
+                        val cleanedAudio = cleanPcm16(buffer, read)
+                        val encoded = Base64.encodeToString(cleanedAudio, Base64.NO_WRAP)
                         signalingClient.sendAudioChunk(channelId, targetUserId, encoded, sampleRate, sequence++)
                     }
                 }
@@ -98,7 +98,7 @@ class RelayAudioManager @Inject constructor(
 
     fun playChunk(encodedAudio: String, incomingSampleRate: Int = sampleRate, incomingSequence: Int = 0) {
         if (isRecording) return
-        if (CallStateHelper.isPhoneCallActive(context)) return
+        if (CallStateHelper.shouldBlockAppAudio(context)) return
         if (incomingSequence == 0) {
             lastPlaybackSequence = -1
             clearPlaybackQueue()
@@ -163,11 +163,33 @@ class RelayAudioManager @Inject constructor(
         if (NoiseSuppressor.isAvailable()) {
             NoiseSuppressor.create(audioSessionId)?.enabled = true
         }
-        if (AutomaticGainControl.isAvailable()) {
-            AutomaticGainControl.create(audioSessionId)?.enabled = true
-        }
         if (AcousticEchoCanceler.isAvailable()) {
             AcousticEchoCanceler.create(audioSessionId)?.enabled = true
         }
+    }
+
+    private fun cleanPcm16(source: ByteArray, length: Int): ByteArray {
+        val cleaned = source.copyOf(length)
+        val noiseGate = 280
+        val limiter = 26000
+
+        var i = 0
+        while (i + 1 < cleaned.size) {
+            var sample = (cleaned[i].toInt() and 0xFF) or (cleaned[i + 1].toInt() shl 8)
+            if (sample > Short.MAX_VALUE) sample -= 65536
+
+            sample = when {
+                kotlin.math.abs(sample) < noiseGate -> 0
+                sample > limiter -> limiter + ((sample - limiter) / 4)
+                sample < -limiter -> -limiter + ((sample + limiter) / 4)
+                else -> sample
+            }.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+
+            cleaned[i] = (sample and 0xFF).toByte()
+            cleaned[i + 1] = ((sample shr 8) and 0xFF).toByte()
+            i += 2
+        }
+
+        return cleaned
     }
 }

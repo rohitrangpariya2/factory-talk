@@ -104,9 +104,13 @@ fun UserListItem(
                 }
                 
                 Text(
-                    text = if (user.isOnline) "Online" else "Last seen: ${formatTime(user.lastSeen)}",
+                    text = when {
+                        user.isBusy -> "Busy - phone call active"
+                        user.isOnline -> "Online"
+                        else -> "Last seen: ${formatTime(user.lastSeen)}"
+                    },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (user.isBusy) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             

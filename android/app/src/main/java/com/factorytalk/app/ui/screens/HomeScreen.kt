@@ -45,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -99,6 +100,8 @@ fun HomeScreen(
     val onlineUsers by viewModel.onlineUsers.collectAsState()
     val talkDuration by viewModel.talkDurationSeconds.collectAsState()
     var showNameDialog by remember { mutableStateOf(false) }
+    val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE) }
+    var walkieEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_WALKIE_ENABLED, true)) }
     var deviceNameInput by remember(currentUser?.displayName) {
         mutableStateOf(currentUser?.displayName.orEmpty())
     }
@@ -133,7 +136,7 @@ fun HomeScreen(
 
     // Start foreground service when Home opens
     LaunchedEffect(currentChannel) {
-        currentChannel?.let { channel ->
+        currentChannel?.takeIf { walkieEnabled }?.let { channel ->
             if (PermissionHelper.hasRecordAudioPermission(context)) {
                 try {
                     val intent = Intent(context, TalkForegroundService::class.java).apply {
@@ -176,6 +179,33 @@ fun HomeScreen(
                         containerColor = MaterialTheme.colorScheme.background
                     ),
                     actions = {
+                        Switch(
+                            checked = walkieEnabled,
+                            onCheckedChange = { enabled ->
+                                walkieEnabled = enabled
+                                prefs.edit().putBoolean(Constants.PREF_WALKIE_ENABLED, enabled).apply()
+                                if (enabled) {
+                                    currentChannel?.let { channel ->
+                                        val startIntent = Intent(context, TalkForegroundService::class.java).apply {
+                                            action = Constants.ACTION_START_SERVICE
+                                        }
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                            context.startForegroundService(startIntent)
+                                        } else {
+                                            context.startService(startIntent)
+                                        }
+                                        context.startService(Intent(context, TalkForegroundService::class.java).apply {
+                                            action = Constants.ACTION_JOIN_CHANNEL
+                                            putExtra(Constants.EXTRA_CHANNEL_ID, channel.id)
+                                        })
+                                    }
+                                } else {
+                                    context.startService(Intent(context, TalkForegroundService::class.java).apply {
+                                        action = Constants.ACTION_STOP_SERVICE
+                                    })
+                                }
+                            }
+                        )
                         IconButton(onClick = onNavigateToSetupCheck) {
                             Icon(Icons.Default.Warning, contentDescription = "Setup check")
                         }
@@ -411,9 +441,9 @@ fun HomeScreen(
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = user.displayName.split(" ").first(),
+                                text = if (user.isBusy) "${user.displayName.split(" ").first()} Busy" else user.displayName.split(" ").first(),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = if (user.isBusy) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -451,7 +481,11 @@ fun HomeScreen(
                 remainingSeconds = talkDuration,
                 onPressStart = {
                     android.util.Log.d("HomeScreen", "onPressStart triggered")
-                    if (CallStateHelper.isPhoneCallActive(context)) {
+                    if (!walkieEnabled) {
+                        android.widget.Toast.makeText(context, "Walkie Talkie is OFF", android.widget.Toast.LENGTH_SHORT).show()
+                        return@TalkButton
+                    }
+                    if (CallStateHelper.shouldBlockAppAudio(context)) {
                         android.widget.Toast.makeText(context, "Phone call is active", android.widget.Toast.LENGTH_SHORT).show()
                         return@TalkButton
                     }

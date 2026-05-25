@@ -44,9 +44,7 @@ class HomeViewModel @Inject constructor(
     val currentSpeaker = floorControlManager.currentSpeaker
     val talkDurationSeconds = floorControlManager.talkDurationSeconds
 
-    private val _onlineUsers = MutableStateFlow<List<User>>(emptyList())
-    val onlineUsers: StateFlow<List<User>> = _onlineUsers.asStateFlow()
-    private val onlineUserMap = linkedMapOf<String, User>()
+    val onlineUsers: StateFlow<List<User>> = signalingClient.onlineUsers
 
     private val _currentChannel = MutableStateFlow<Channel?>(null)
     val currentChannel: StateFlow<Channel?> = _currentChannel.asStateFlow()
@@ -75,62 +73,6 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        viewModelScope.launch {
-            // Listen for users
-            userRepository.getUsers().collect { users ->
-                onlineUserMap.clear()
-                users.filter { it.isOnline }.forEach { onlineUserMap[it.id] = it }
-                publishOnlineUsers()
-            }
-        }
-
-        viewModelScope.launch {
-            signalingClient.events.collect { event ->
-                when (event) {
-                    is SignalingEvent.ChannelInfo -> {
-                        event.members.forEach { member ->
-                            userFromJson(member)?.let { onlineUserMap[it.id] = it }
-                        }
-                        publishOnlineUsers()
-                    }
-                    is SignalingEvent.UserJoined -> {
-                        onlineUserMap[event.userId] = User(
-                            id = event.userId,
-                            displayName = event.name,
-                            role = event.role,
-                            isOnline = true
-                        )
-                        publishOnlineUsers()
-                    }
-                    is SignalingEvent.UserLeft -> {
-                        onlineUserMap.remove(event.userId)
-                        publishOnlineUsers()
-                    }
-                    else -> Unit
-                }
-            }
-        }
-    }
-
-    private fun publishOnlineUsers() {
-        _onlineUsers.value = onlineUserMap.values
-            .filter { it.isOnline }
-            .distinctBy { it.id }
-            .sortedByDescending { it.role.priority }
-    }
-
-    private fun userFromJson(member: JSONObject): User? {
-        val id = member.optString("userId").ifBlank { return null }
-        val name = member.optString("userName", member.optString("name", "Factory Phone"))
-        val role = runCatching { UserRole.valueOf(member.optString("role", UserRole.WORKER.name)) }
-            .getOrDefault(UserRole.WORKER)
-
-        return User(
-            id = id,
-            displayName = name,
-            role = role,
-            isOnline = true
-        )
     }
 
     fun requestFloor() {

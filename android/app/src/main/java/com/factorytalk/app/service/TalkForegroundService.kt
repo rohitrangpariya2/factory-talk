@@ -32,6 +32,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.webrtc.PeerConnection
 import javax.inject.Inject
@@ -58,7 +59,11 @@ class TalkForegroundService : Service() {
     private var currentUserName: String? = null
     private var currentUserRole: UserRole = UserRole.WORKER
     private var statusJob: Job? = null
+    private var signalingJob: Job? = null
+    private var reconnectJob: Job? = null
+    private var callStatusJob: Job? = null
     private var isTalking = false
+    private var lastCallBusyStatus = false
     private var explicitStopRequested = false
 
     override fun onCreate() {
@@ -81,6 +86,8 @@ class TalkForegroundService : Service() {
             connectionWatchdog.start()
             serverHealthMonitor.start(Constants.SERVER_URL)
             observeServerStatus()
+            observeNetworkReconnect()
+            observeCallStatus()
             initializeSignaling()
             ServiceRestartScheduler.scheduleWatchdog(this)
         }
@@ -162,7 +169,8 @@ class TalkForegroundService : Service() {
     }
 
     private fun initializeSignaling() {
-        serviceScope.launch {
+        signalingJob?.cancel()
+        signalingJob = serviceScope.launch {
             val user = userRepository.getCurrentUser().firstOrNull() ?: return@launch
             currentUserId = user.id
             currentUserName = user.displayName
@@ -188,6 +196,45 @@ class TalkForegroundService : Service() {
             // Listen to signaling events
             signalingClient.events.collect { event ->
                 handleSignalingEvent(event, user.id)
+            }
+        }
+    }
+
+    private fun observeNetworkReconnect() {
+        if (reconnectJob?.isActive == true) return
+        reconnectJob = serviceScope.launch {
+            while (true) {
+                delay(30_000L)
+                if (
+                    connectionWatchdog.networkState.value &&
+                    signalingClient.connectionState.value != com.factorytalk.app.data.model.ConnectionState.CONNECTED
+                ) {
+                    signalingClient.disconnect()
+                    initializeSignaling()
+                    updateNotification("Reconnecting...")
+                } else if (signalingClient.connectionState.value == com.factorytalk.app.data.model.ConnectionState.CONNECTED) {
+                    currentChannelId?.let { signalingClient.joinChannel(it) }
+                }
+            }
+        }
+    }
+
+    private fun observeCallStatus() {
+        if (callStatusJob?.isActive == true) return
+        callStatusJob = serviceScope.launch {
+            while (true) {
+                val isBusy = com.factorytalk.app.util.CallStateHelper.isPhoneCallActive(this@TalkForegroundService)
+                if (isBusy != lastCallBusyStatus) {
+                    lastCallBusyStatus = isBusy
+                    signalingClient.sendUserStatus(isBusy)
+                    if (isBusy) {
+                        relayAudioManager.stopBroadcast()
+                        updateNotification("Phone call active - Busy")
+                    } else if (signalingClient.connectionState.value == com.factorytalk.app.data.model.ConnectionState.CONNECTED) {
+                        updateNotification("Connected - Listening")
+                    }
+                }
+                delay(3000L)
             }
         }
     }
@@ -405,6 +452,12 @@ class TalkForegroundService : Service() {
     private fun cleanupRuntimeResources() {
         statusJob?.cancel()
         statusJob = null
+        signalingJob?.cancel()
+        signalingJob = null
+        reconnectJob?.cancel()
+        reconnectJob = null
+        callStatusJob?.cancel()
+        callStatusJob = null
         if (wakeLock?.isHeld == true) wakeLock?.release()
         runCatching { connectionWatchdog.stop() }
         serverHealthMonitor.stop()
