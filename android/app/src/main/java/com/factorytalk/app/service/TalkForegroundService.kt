@@ -70,6 +70,7 @@ class TalkForegroundService : Service() {
     private var callStatusJob: Job? = null
     private var locationJob: Job? = null
     private var locationListener: LocationListener? = null
+    private var lastKnownLocation: Location? = null
     private var isTalking = false
     private var lastCallBusyStatus = false
     private var explicitStopRequested = false
@@ -259,6 +260,7 @@ class TalkForegroundService : Service() {
                         startForegroundServiceWithNotification()
                     }
                     startLocationUpdates()
+                    sendLastKnownLocation()
                 } else {
                     stopLocationUpdates()
                 }
@@ -277,13 +279,15 @@ class TalkForegroundService : Service() {
         }
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                signalingClient.sendLocation(location.latitude, location.longitude)
+                lastKnownLocation = location
+                sendLastKnownLocation()
             }
         }
         try {
             locationListener = listener
             locationManager.getLastKnownLocation(provider)?.let {
-                signalingClient.sendLocation(it.latitude, it.longitude)
+                lastKnownLocation = it
+                sendLastKnownLocation()
             }
             locationManager.requestLocationUpdates(provider, 30_000L, 25f, listener, Looper.getMainLooper())
         } catch (e: SecurityException) {
@@ -298,6 +302,11 @@ class TalkForegroundService : Service() {
         val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         runCatching { locationManager.removeUpdates(listener) }
         locationListener = null
+    }
+
+    private fun sendLastKnownLocation() {
+        val location = lastKnownLocation ?: return
+        signalingClient.sendLocation(location.latitude, location.longitude)
     }
 
     private fun hasLocationPermission(): Boolean {
@@ -333,6 +342,7 @@ class TalkForegroundService : Service() {
         when (event) {
             is com.factorytalk.app.data.remote.SignalingEvent.Connected -> {
                 currentChannelId?.let { signalingClient.joinChannel(it) }
+                sendLastKnownLocation()
                 updateNotification("Connected - Listening")
             }
             is com.factorytalk.app.data.remote.SignalingEvent.FloorGranted -> {

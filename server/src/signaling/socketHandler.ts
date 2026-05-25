@@ -10,6 +10,7 @@ import { logTalkStart, logTalkEnd } from '../services/logService';
 import { buildAudioRelayEvent } from './audioRelay';
 
 let reminderSchedule: { onTime: string; offTime: string } | null = null;
+const latestLocations = new Map<string, { latitude: number; longitude: number; locationUpdatedAt: number }>();
 
 export function setupSocketHandler(io: Server) {
   
@@ -68,6 +69,12 @@ export function setupSocketHandler(io: Server) {
 
     socket.on('join_channel', (channelId: string) => {
       socket.join(channelId);
+      const latestLocation = latestLocations.get(user.userId);
+      if (latestLocation) {
+        user.latitude = latestLocation.latitude;
+        user.longitude = latestLocation.longitude;
+        user.locationUpdatedAt = latestLocation.locationUpdatedAt;
+      }
       joinChannel(channelId, socket.id, user);
       
       const members = getChannelMembers(channelId);
@@ -116,16 +123,20 @@ export function setupSocketHandler(io: Server) {
       user.latitude = latitude;
       user.longitude = longitude;
       user.locationUpdatedAt = Date.now();
+      latestLocations.set(user.userId, {
+        latitude: user.latitude,
+        longitude: user.longitude,
+        locationUpdatedAt: user.locationUpdatedAt
+      });
 
-      const channelIds = Array.from(socket.rooms).filter(room => room !== socket.id);
-      for (const channelId of channelIds) {
-        socket.to(channelId).emit('user_location_updated', {
-          userId: user.userId,
-          latitude: user.latitude,
-          longitude: user.longitude,
-          locationUpdatedAt: user.locationUpdatedAt
-        });
-      }
+      io.emit('user_location_updated', {
+        userId: user.userId,
+        name: user.userName,
+        role: user.role,
+        latitude: user.latitude,
+        longitude: user.longitude,
+        locationUpdatedAt: user.locationUpdatedAt
+      });
     });
 
     socket.on('audio_chunk', (payload) => {

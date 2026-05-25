@@ -179,14 +179,27 @@ class SignalingClient(
                     val latitude = data.optNullableDouble("latitude")
                     val longitude = data.optNullableDouble("longitude")
                     val updatedAt = data.optLong("locationUpdatedAt", 0L)
-                    onlineUserMap[userId]?.let { user ->
-                        onlineUserMap[userId] = user.copy(
+                    val existingUser = onlineUserMap[userId]
+                    if (existingUser != null) {
+                        onlineUserMap[userId] = existingUser.copy(
                             latitude = latitude,
                             longitude = longitude,
                             locationUpdatedAt = updatedAt
                         )
-                        publishOnlineUsers()
+                    } else {
+                        val role = runCatching { UserRole.valueOf(data.optString("role", UserRole.WORKER.name)) }
+                            .getOrDefault(UserRole.WORKER)
+                        onlineUserMap[userId] = User(
+                            id = userId,
+                            displayName = data.optString("name", "Factory Phone"),
+                            role = role,
+                            isOnline = true,
+                            latitude = latitude,
+                            longitude = longitude,
+                            locationUpdatedAt = updatedAt
+                        )
                     }
+                    publishOnlineUsers()
                     if (latitude != null && longitude != null) {
                         _events.tryEmit(SignalingEvent.UserLocationUpdated(userId, latitude, longitude, updatedAt))
                     }
