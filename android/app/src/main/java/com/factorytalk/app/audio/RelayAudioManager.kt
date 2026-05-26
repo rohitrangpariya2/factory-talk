@@ -8,7 +8,9 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Build
 import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
 import android.util.Base64
 import androidx.core.content.ContextCompat
@@ -49,11 +51,23 @@ class RelayAudioManager @Inject constructor(
     private val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
     private val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-    private val recorderSources = listOf(
-        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-        MediaRecorder.AudioSource.MIC,
-        MediaRecorder.AudioSource.CAMCORDER
-    )
+    private val recorderSources: List<Int>
+        get() {
+            val isSamsung = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
+            return if (isSamsung) {
+                listOf(
+                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    MediaRecorder.AudioSource.CAMCORDER
+                )
+            } else {
+                listOf(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.CAMCORDER
+                )
+            }
+        }
 
     fun startBroadcast(channelId: String, targetUserId: String? = null) {
         if (recordingJob?.isActive == true) return
@@ -184,6 +198,9 @@ class RelayAudioManager @Inject constructor(
         if (NoiseSuppressor.isAvailable()) {
             NoiseSuppressor.create(audioSessionId)?.enabled = true
         }
+        if (AutomaticGainControl.isAvailable()) {
+            AutomaticGainControl.create(audioSessionId)?.enabled = true
+        }
         if (AcousticEchoCanceler.isAvailable()) {
             AcousticEchoCanceler.create(audioSessionId)?.enabled = true
         }
@@ -192,7 +209,7 @@ class RelayAudioManager @Inject constructor(
     private fun cleanPcm16(source: ByteArray, length: Int): ByteArray {
         val cleaned = source.copyOf(length)
         val noiseGate = 280
-        val quietRmsGate = 260.0
+        val quietRmsGate = 120.0
         val softRmsGate = 900.0
         val targetVoiceRms = 1900.0
         val limiter = 26000
