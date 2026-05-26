@@ -331,7 +331,7 @@ class TalkForegroundService : Service() {
 
     private fun sendLastKnownLocation() {
         val location = lastKnownLocation ?: return
-        signalingClient.sendLocation(location.latitude, location.longitude)
+        signalingClient.sendLocation(location.latitude, location.longitude, location.accuracy)
         getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putLong(Constants.PREF_LAST_LOCATION_SENT_AT, System.currentTimeMillis())

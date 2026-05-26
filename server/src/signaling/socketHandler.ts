@@ -17,6 +17,8 @@ const latestLocations = new Map<string, {
   role: UserRole;
   latitude: number;
   longitude: number;
+  accuracy?: number;
+  isBusy?: boolean;
   locationUpdatedAt: number;
 }>();
 
@@ -122,6 +124,13 @@ export function setupSocketHandler(io: Server) {
 
     socket.on('user_status', (payload) => {
       user.isBusy = !!payload?.isBusy;
+      const latestLocation = latestLocations.get(user.userId);
+      if (latestLocation) {
+        latestLocations.set(user.userId, {
+          ...latestLocation,
+          isBusy: !!user.isBusy
+        });
+      }
       const channelIds = Array.from(socket.rooms).filter(room => room !== socket.id);
       for (const channelId of channelIds) {
         socket.to(channelId).emit('user_status', {
@@ -140,6 +149,7 @@ export function setupSocketHandler(io: Server) {
     socket.on('location_update', (payload) => {
       const latitude = Number(payload?.latitude);
       const longitude = Number(payload?.longitude);
+      const accuracy = Number(payload?.accuracy);
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
       if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return;
 
@@ -152,6 +162,8 @@ export function setupSocketHandler(io: Server) {
         role: user.role,
         latitude: user.latitude,
         longitude: user.longitude,
+        accuracy: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : undefined,
+        isBusy: !!user.isBusy,
         locationUpdatedAt: user.locationUpdatedAt
       });
 
@@ -161,6 +173,8 @@ export function setupSocketHandler(io: Server) {
         role: user.role,
         latitude: user.latitude,
         longitude: user.longitude,
+        accuracy: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : undefined,
+        isBusy: !!user.isBusy,
         locationUpdatedAt: user.locationUpdatedAt
       });
     });
