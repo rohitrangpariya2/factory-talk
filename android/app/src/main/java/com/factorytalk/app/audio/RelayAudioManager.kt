@@ -38,6 +38,8 @@ class RelayAudioManager @Inject constructor(
     private var isRecording = false
     private var sequence = 0
     private var lastPlaybackSequence = -1
+    private var highPassPreviousInput = 0.0
+    private var highPassPreviousOutput = 0.0
     private val playbackQueue = Channel<ByteArray>(
         capacity = 8,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
@@ -189,9 +191,10 @@ class RelayAudioManager @Inject constructor(
 
     private fun cleanPcm16(source: ByteArray, length: Int): ByteArray {
         val cleaned = source.copyOf(length)
-        val noiseGate = 160
-        val quietRmsGate = 140.0
-        val targetVoiceRms = 2800.0
+        val noiseGate = 280
+        val quietRmsGate = 260.0
+        val softRmsGate = 900.0
+        val targetVoiceRms = 1900.0
         val limiter = 26000
         val sampleCount = cleaned.size / 2
         if (sampleCount == 0) return cleaned
@@ -209,15 +212,25 @@ class RelayAudioManager @Inject constructor(
         if (rms < quietRmsGate) {
             return ByteArray(length)
         }
-        val voiceGain = (targetVoiceRms / rms).coerceIn(1.0, 3.8)
+        val voiceGain = if (rms < softRmsGate) {
+            (targetVoiceRms / rms).coerceIn(1.0, 2.4)
+        } else {
+            (targetVoiceRms / rms).coerceIn(0.75, 1.35)
+        }
 
         var i = 0
         while (i + 1 < cleaned.size) {
             var sample = (cleaned[i].toInt() and 0xFF) or (cleaned[i + 1].toInt() shl 8)
             if (sample > Short.MAX_VALUE) sample -= 65536
 
+            val highPassed = sample - highPassPreviousInput + (0.96 * highPassPreviousOutput)
+            highPassPreviousInput = sample.toDouble()
+            highPassPreviousOutput = highPassed
+            sample = highPassed.toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+
             sample = when {
                 kotlin.math.abs(sample) < noiseGate -> 0
+                kotlin.math.abs(sample) < noiseGate * 3 -> (sample * 0.45).toInt()
                 sample > limiter -> limiter + ((sample - limiter) / 4)
                 sample < -limiter -> -limiter + ((sample + limiter) / 4)
                 else -> sample
