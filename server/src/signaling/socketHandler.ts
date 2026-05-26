@@ -10,6 +10,7 @@ import { logTalkStart, logTalkEnd } from '../services/logService';
 import { buildAudioRelayEvent } from './audioRelay';
 
 let reminderSchedule: { onTime: string; offTime: string } | null = null;
+const busyDisconnectGraceTimers = new Map<string, NodeJS.Timeout>();
 const latestLocations = new Map<string, {
   userId: string;
   name: string;
@@ -70,6 +71,11 @@ export function setupSocketHandler(io: Server) {
   io.on('connection', async (socket: Socket) => {
     const user: ConnectedUser = socket.data.user;
     console.log(`User connected: ${user.userName} (${socket.id})`);
+    const pendingBusyTimer = busyDisconnectGraceTimers.get(user.userId);
+    if (pendingBusyTimer) {
+      clearTimeout(pendingBusyTimer);
+      busyDisconnectGraceTimers.delete(user.userId);
+    }
 
     if (!user.isDeviceAuth) {
       await updateUserOnlineStatus(user.userId, true);
@@ -262,6 +268,20 @@ export function setupSocketHandler(io: Server) {
           }
         }
         if (!isUserInChannel(channelId, user.userId)) {
+          if (user.isBusy) {
+            io.to(channelId).emit('user_status', {
+              userId: user.userId,
+              isBusy: true
+            });
+            const existingTimer = busyDisconnectGraceTimers.get(user.userId);
+            if (existingTimer) clearTimeout(existingTimer);
+            const timer = setTimeout(() => {
+              io.to(channelId).emit('user_left', { userId: user.userId });
+              busyDisconnectGraceTimers.delete(user.userId);
+            }, 2 * 60 * 1000);
+            busyDisconnectGraceTimers.set(user.userId, timer);
+            continue;
+          }
           io.to(channelId).emit('user_left', { userId: user.userId });
         }
       }
