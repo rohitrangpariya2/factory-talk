@@ -56,6 +56,7 @@ class RelayAudioManager @Inject constructor(
             val isSamsung = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
             return if (isSamsung) {
                 listOf(
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
                     MediaRecorder.AudioSource.MIC,
                     MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                     MediaRecorder.AudioSource.CAMCORDER
@@ -208,10 +209,9 @@ class RelayAudioManager @Inject constructor(
 
     private fun cleanPcm16(source: ByteArray, length: Int): ByteArray {
         val cleaned = source.copyOf(length)
-        val noiseGate = 360
-        val quietRmsGate = 180.0
-        val softRmsGate = 1100.0
-        val targetVoiceRms = 1700.0
+        val noiseGate = 430
+        val quietRmsGate = 620.0
+        val softRmsGate = 1050.0
         val limiter = 26000
         val sampleCount = cleaned.size / 2
         if (sampleCount == 0) return cleaned
@@ -229,11 +229,7 @@ class RelayAudioManager @Inject constructor(
         if (rms < quietRmsGate) {
             return ByteArray(length)
         }
-        val voiceGain = if (rms < softRmsGate) {
-            (targetVoiceRms / rms).coerceIn(1.0, 1.9)
-        } else {
-            (targetVoiceRms / rms).coerceIn(0.65, 1.15)
-        }
+        val quietGain = if (rms < softRmsGate) 0.35 else 1.0
 
         var i = 0
         while (i + 1 < cleaned.size) {
@@ -247,19 +243,17 @@ class RelayAudioManager @Inject constructor(
 
             sample = when {
                 kotlin.math.abs(sample) < noiseGate -> 0
-                kotlin.math.abs(sample) < noiseGate * 3 -> (sample * 0.32).toInt()
                 sample > limiter -> limiter + ((sample - limiter) / 4)
                 sample < -limiter -> -limiter + ((sample + limiter) / 4)
                 else -> sample
             }
-            sample = (sample * voiceGain).toInt()
+            sample = (sample * quietGain).toInt()
                 .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
 
             cleaned[i] = (sample and 0xFF).toByte()
             cleaned[i + 1] = ((sample shr 8) and 0xFF).toByte()
             i += 2
         }
-
         return cleaned
     }
 }
