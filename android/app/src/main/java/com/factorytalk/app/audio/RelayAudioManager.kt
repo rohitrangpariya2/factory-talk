@@ -199,7 +199,7 @@ class RelayAudioManager @Inject constructor(
             NoiseSuppressor.create(audioSessionId)?.enabled = true
         }
         if (AutomaticGainControl.isAvailable()) {
-            AutomaticGainControl.create(audioSessionId)?.enabled = true
+            AutomaticGainControl.create(audioSessionId)?.enabled = false
         }
         if (AcousticEchoCanceler.isAvailable()) {
             AcousticEchoCanceler.create(audioSessionId)?.enabled = true
@@ -208,10 +208,10 @@ class RelayAudioManager @Inject constructor(
 
     private fun cleanPcm16(source: ByteArray, length: Int): ByteArray {
         val cleaned = source.copyOf(length)
-        val noiseGate = 280
-        val quietRmsGate = 120.0
-        val softRmsGate = 900.0
-        val targetVoiceRms = 1900.0
+        val noiseGate = 360
+        val quietRmsGate = 180.0
+        val softRmsGate = 1100.0
+        val targetVoiceRms = 1700.0
         val limiter = 26000
         val sampleCount = cleaned.size / 2
         if (sampleCount == 0) return cleaned
@@ -230,9 +230,9 @@ class RelayAudioManager @Inject constructor(
             return ByteArray(length)
         }
         val voiceGain = if (rms < softRmsGate) {
-            (targetVoiceRms / rms).coerceIn(1.0, 2.4)
+            (targetVoiceRms / rms).coerceIn(1.0, 1.9)
         } else {
-            (targetVoiceRms / rms).coerceIn(0.75, 1.35)
+            (targetVoiceRms / rms).coerceIn(0.65, 1.15)
         }
 
         var i = 0
@@ -247,7 +247,7 @@ class RelayAudioManager @Inject constructor(
 
             sample = when {
                 kotlin.math.abs(sample) < noiseGate -> 0
-                kotlin.math.abs(sample) < noiseGate * 3 -> (sample * 0.45).toInt()
+                kotlin.math.abs(sample) < noiseGate * 3 -> (sample * 0.32).toInt()
                 sample > limiter -> limiter + ((sample - limiter) / 4)
                 sample < -limiter -> -limiter + ((sample + limiter) / 4)
                 else -> sample
