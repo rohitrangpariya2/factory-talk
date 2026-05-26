@@ -47,6 +47,11 @@ class RelayAudioManager @Inject constructor(
     private val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
     private val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+    private val recorderSources = listOf(
+        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+        MediaRecorder.AudioSource.MIC,
+        MediaRecorder.AudioSource.CAMCORDER
+    )
 
     fun startBroadcast(channelId: String, targetUserId: String? = null) {
         if (recordingJob?.isActive == true) return
@@ -61,13 +66,7 @@ class RelayAudioManager @Inject constructor(
         sequence = 0
 
         recordingJob = scope.launch {
-            val recorder = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                sampleRate,
-                channelConfigIn,
-                audioFormat,
-                recorderBufferSize
-            )
+            val recorder = createRecorder(recorderBufferSize) ?: return@launch
             enableVoiceProcessing(recorder.audioSessionId)
             val buffer = ByteArray(chunkSize)
 
@@ -88,6 +87,26 @@ class RelayAudioManager @Inject constructor(
                 recorder.release()
             }
         }
+    }
+
+    private fun createRecorder(bufferSize: Int): AudioRecord? {
+        for (source in recorderSources) {
+            val recorder = runCatching {
+                AudioRecord(
+                    source,
+                    sampleRate,
+                    channelConfigIn,
+                    audioFormat,
+                    bufferSize
+                )
+            }.getOrNull()
+
+            if (recorder?.state == AudioRecord.STATE_INITIALIZED) {
+                return recorder
+            }
+            recorder?.release()
+        }
+        return null
     }
 
     fun stopBroadcast() {
@@ -170,9 +189,9 @@ class RelayAudioManager @Inject constructor(
 
     private fun cleanPcm16(source: ByteArray, length: Int): ByteArray {
         val cleaned = source.copyOf(length)
-        val noiseGate = 430
-        val quietRmsGate = 620.0
-        val softRmsGate = 1050.0
+        val noiseGate = 160
+        val quietRmsGate = 140.0
+        val targetVoiceRms = 2800.0
         val limiter = 26000
         val sampleCount = cleaned.size / 2
         if (sampleCount == 0) return cleaned
@@ -190,7 +209,7 @@ class RelayAudioManager @Inject constructor(
         if (rms < quietRmsGate) {
             return ByteArray(length)
         }
-        val quietGain = if (rms < softRmsGate) 0.35 else 1.0
+        val voiceGain = (targetVoiceRms / rms).coerceIn(1.0, 3.8)
 
         var i = 0
         while (i + 1 < cleaned.size) {
@@ -203,7 +222,7 @@ class RelayAudioManager @Inject constructor(
                 sample < -limiter -> -limiter + ((sample + limiter) / 4)
                 else -> sample
             }
-            sample = (sample * quietGain).toInt()
+            sample = (sample * voiceGain).toInt()
                 .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
 
             cleaned[i] = (sample and 0xFF).toByte()
