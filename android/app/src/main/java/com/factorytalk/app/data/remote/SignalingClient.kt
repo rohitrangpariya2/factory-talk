@@ -300,11 +300,12 @@ class SignalingClient(
         })
     }
 
-    fun sendLocation(latitude: Double, longitude: Double, accuracy: Float? = null) {
+    fun sendLocation(latitude: Double, longitude: Double, accuracy: Float? = null, locationTime: Long? = null) {
         socket?.emit("location_update", JSONObject().apply {
             put("latitude", latitude)
             put("longitude", longitude)
             accuracy?.let { put("accuracy", it) }
+            locationTime?.let { put("locationTime", it) }
         })
     }
 

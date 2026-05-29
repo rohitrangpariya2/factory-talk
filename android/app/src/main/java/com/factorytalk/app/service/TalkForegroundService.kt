@@ -214,7 +214,7 @@ class TalkForegroundService : Service() {
         if (reconnectJob?.isActive == true) return
         reconnectJob = serviceScope.launch {
             while (true) {
-                delay(30_000L)
+                delay(10_000L)
                 if (
                     connectionWatchdog.networkState.value &&
                     signalingClient.connectionState.value != com.factorytalk.app.data.model.ConnectionState.CONNECTED
@@ -259,13 +259,16 @@ class TalkForegroundService : Service() {
                     if (locationListener == null) {
                         startForegroundServiceWithNotification()
                     }
+                    if (isLastLocationStale(45_000L)) {
+                        stopLocationUpdates()
+                    }
                     startLocationUpdates()
                     sendLastKnownLocation()
                 } else {
                     if (enabled) updateLocationStatus("Location permission missing")
                     stopLocationUpdates()
                 }
-                delay(15_000L)
+                delay(5_000L)
             }
         }
     }
@@ -300,7 +303,7 @@ class TalkForegroundService : Service() {
                 runCatching {
                     locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
                 }
-                locationManager.requestLocationUpdates(provider, 10_000L, 0f, listener, Looper.getMainLooper())
+                locationManager.requestLocationUpdates(provider, 5_000L, 0f, listener, Looper.getMainLooper())
             }
             if (lastKnownLocation == null) updateLocationStatus("Waiting for GPS/location fix")
         } catch (e: SecurityException) {
@@ -331,7 +334,11 @@ class TalkForegroundService : Service() {
 
     private fun sendLastKnownLocation() {
         val location = lastKnownLocation ?: return
-        signalingClient.sendLocation(location.latitude, location.longitude, location.accuracy)
+        if (isLocationStale(location, 120_000L)) {
+            updateLocationStatus("Waiting for fresh GPS/location fix")
+            return
+        }
+        signalingClient.sendLocation(location.latitude, location.longitude, location.accuracy, location.time)
         getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putLong(Constants.PREF_LAST_LOCATION_SENT_AT, System.currentTimeMillis())
@@ -339,6 +346,16 @@ class TalkForegroundService : Service() {
             .putString(Constants.PREF_LAST_LOCATION_LONGITUDE, location.longitude.toString())
             .putString(Constants.PREF_LOCATION_STATUS, "Location sent")
             .apply()
+    }
+
+    private fun isLastLocationStale(maxAgeMs: Long): Boolean {
+        val location = lastKnownLocation ?: return true
+        return isLocationStale(location, maxAgeMs)
+    }
+
+    private fun isLocationStale(location: Location, maxAgeMs: Long): Boolean {
+        val ageMs = System.currentTimeMillis() - location.time
+        return location.time <= 0L || ageMs > maxAgeMs || ageMs < -30_000L
     }
 
     private fun updateLocationStatus(status: String) {

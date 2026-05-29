@@ -1,7 +1,10 @@
 package com.factorytalk.app.ui.screens
 
+import android.app.Activity
+import android.os.Build
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,10 +26,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,7 +43,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.factorytalk.app.data.model.Channel
 import com.factorytalk.app.data.model.ChannelType
@@ -48,6 +56,7 @@ import com.factorytalk.app.data.repository.ChannelRepository
 import com.factorytalk.app.service.ReminderScheduler
 import com.factorytalk.app.service.TalkForegroundService
 import com.factorytalk.app.util.Constants
+import com.factorytalk.app.util.PermissionHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -146,6 +155,29 @@ fun AdminScreen(
     var currentPin by remember { mutableStateOf("") }
     var newPin by remember { mutableStateOf("") }
     var pinMessage by remember { mutableStateOf("") }
+    var allowAudioDuringCall by remember { mutableStateOf(false) }
+    var locationSharingEnabled by remember { mutableStateOf(false) }
+    var lastLocationSentAt by remember { mutableStateOf(0L) }
+    var locationStatus by remember { mutableStateOf("") }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    fun refreshPhoneControlState() {
+        allowAudioDuringCall = prefs.getBoolean(Constants.PREF_ALLOW_AUDIO_DURING_CALL, false)
+        locationSharingEnabled = prefs.getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
+        lastLocationSentAt = prefs.getLong(Constants.PREF_LAST_LOCATION_SENT_AT, 0L)
+        locationStatus = prefs.getString(Constants.PREF_LOCATION_STATUS, "") ?: ""
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        refreshPhoneControlState()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshPhoneControlState()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -246,6 +278,34 @@ fun AdminScreen(
                         }
                     }
                 }
+            }
+
+            item {
+                PhoneControlsCard(
+                    allowAudioDuringCall = allowAudioDuringCall,
+                    locationSharingEnabled = locationSharingEnabled,
+                    lastLocationSentAt = lastLocationSentAt,
+                    locationStatus = locationStatus,
+                    onAllowAudioDuringCallChanged = { checked ->
+                        allowAudioDuringCall = checked
+                        prefs.edit()
+                            .putBoolean(Constants.PREF_ALLOW_AUDIO_DURING_CALL, checked)
+                            .apply()
+                    },
+                    onLocationSharingChanged = { checked ->
+                        locationSharingEnabled = checked
+                        prefs.edit()
+                            .putBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, checked)
+                            .apply()
+                        if (checked && !PermissionHelper.hasLocationPermission(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            requestLocationPermission(context)
+                        }
+                        startTalkService(context)
+                    },
+                    onOpenLocationSettings = {
+                        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                    }
+                )
             }
 
             item {
@@ -383,6 +443,83 @@ fun AdminScreen(
 }
 
 @Composable
+private fun PhoneControlsCard(
+    allowAudioDuringCall: Boolean,
+    locationSharingEnabled: Boolean,
+    lastLocationSentAt: Long,
+    locationStatus: String,
+    onAllowAudioDuringCallChanged: (Boolean) -> Unit,
+    onLocationSharingChanged: (Boolean) -> Unit,
+    onOpenLocationSettings: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Phone Controls",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Call time audio", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (allowAudioDuringCall) {
+                            "Phone call chalu hoy to pan Factory Talk audio allow."
+                        } else {
+                            "Phone call chalu hoy tyare Factory Talk audio block."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = allowAudioDuringCall,
+                    onCheckedChange = onAllowAudioDuringCallChanged
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Duty location sharing", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (locationSharingEnabled) {
+                            if (lastLocationSentAt > 0L) {
+                                "Last location sent: ${formatSetupControlTime(lastLocationSentAt)}"
+                            } else {
+                                val status = locationStatus.ifBlank { "Waiting for GPS/location fix" }
+                                "$status. Phone Location/GPS ON karo ane permission allow karo."
+                            }
+                        } else {
+                            "OFF hoy tyare admin ne aa phone nu location moklavama nahi ave."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = locationSharingEnabled,
+                    onCheckedChange = onLocationSharingChanged
+                )
+            }
+            if (locationSharingEnabled && lastLocationSentAt == 0L) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onOpenLocationSettings,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Open Phone Location Settings")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun DutyLocationsCard(users: List<User>) {
     val context = LocalContext.current
     val locationUsers = users.filter { it.latitude != null && it.longitude != null && it.locationUpdatedAt > 0 }
@@ -442,6 +579,39 @@ private fun DutyLocationsCard(users: List<User>) {
 
 private fun formatLocationTime(timestamp: Long): String {
     return SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(timestamp))
+}
+
+private fun formatSetupControlTime(timestamp: Long): String {
+    return SimpleDateFormat("hh:mm:ss a", Locale.getDefault()).format(Date(timestamp))
+}
+
+private fun startTalkService(context: android.content.Context) {
+    val serviceIntent = Intent(context, TalkForegroundService::class.java).apply {
+        action = Constants.ACTION_START_SERVICE
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        context.startForegroundService(serviceIntent)
+    } else {
+        context.startService(serviceIntent)
+    }
+}
+
+private fun requestLocationPermission(context: android.content.Context) {
+    var currentContext = context
+    while (currentContext is android.content.ContextWrapper) {
+        if (currentContext is Activity) break
+        currentContext = currentContext.baseContext
+    }
+    (currentContext as? Activity)?.let {
+        androidx.core.app.ActivityCompat.requestPermissions(
+            it,
+            arrayOf(
+                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION
+            ),
+            101
+        )
+    }
 }
 
 private fun isValidTime(time: String): Boolean {

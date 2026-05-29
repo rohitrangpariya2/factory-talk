@@ -19,6 +19,7 @@ const latestLocations = new Map<string, {
   longitude: number;
   accuracy?: number;
   isBusy?: boolean;
+  receivedAt?: number;
   locationUpdatedAt: number;
 }>();
 
@@ -150,12 +151,19 @@ export function setupSocketHandler(io: Server) {
       const latitude = Number(payload?.latitude);
       const longitude = Number(payload?.longitude);
       const accuracy = Number(payload?.accuracy);
+      const locationTime = Number(payload?.locationTime);
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
       if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return;
+      const now = Date.now();
+      const fixTime = Number.isFinite(locationTime) &&
+        locationTime > 946684800000 &&
+        locationTime <= now + 5 * 60 * 1000
+        ? locationTime
+        : now;
 
       user.latitude = latitude;
       user.longitude = longitude;
-      user.locationUpdatedAt = Date.now();
+      user.locationUpdatedAt = fixTime;
       latestLocations.set(user.userId, {
         userId: user.userId,
         name: user.userName,
@@ -164,6 +172,7 @@ export function setupSocketHandler(io: Server) {
         longitude: user.longitude,
         accuracy: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : undefined,
         isBusy: !!user.isBusy,
+        receivedAt: now,
         locationUpdatedAt: user.locationUpdatedAt
       });
 
@@ -175,6 +184,7 @@ export function setupSocketHandler(io: Server) {
         longitude: user.longitude,
         accuracy: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : undefined,
         isBusy: !!user.isBusy,
+        receivedAt: now,
         locationUpdatedAt: user.locationUpdatedAt
       });
     });

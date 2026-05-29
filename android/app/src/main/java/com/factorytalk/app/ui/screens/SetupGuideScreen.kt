@@ -1,8 +1,6 @@
 package com.factorytalk.app.ui.screens
 
 import android.app.Activity
-import android.content.Intent
-import android.provider.Settings
 import android.os.Build
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,7 +20,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -49,7 +46,6 @@ import com.factorytalk.app.data.model.ConnectionState
 import com.factorytalk.app.data.model.ServerHealthStatus
 import com.factorytalk.app.data.remote.ServerHealthMonitor
 import com.factorytalk.app.data.remote.SignalingClient
-import com.factorytalk.app.service.TalkForegroundService
 import com.factorytalk.app.util.BatteryOptimizationHelper
 import com.factorytalk.app.util.Constants
 import com.factorytalk.app.util.PermissionHelper
@@ -86,10 +82,6 @@ fun SetupGuideScreen(
     val context = LocalContext.current
     var hasRequiredPermissions by remember { mutableStateOf(false) }
     var isIgnoringBattery by remember { mutableStateOf(false) }
-    var allowAudioDuringCall by remember { mutableStateOf(false) }
-    var locationSharingEnabled by remember { mutableStateOf(false) }
-    var lastLocationSentAt by remember { mutableStateOf(0L) }
-    var locationStatus by remember { mutableStateOf("") }
     val connectionState by viewModel.connectionState.collectAsState()
     val serverHealthStatus by viewModel.serverHealthStatus.collectAsState()
 
@@ -100,18 +92,6 @@ fun SetupGuideScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasRequiredPermissions = PermissionHelper.getMissingPermissions(context).isEmpty()
                 isIgnoringBattery = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
-                allowAudioDuringCall = context
-                    .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                    .getBoolean(Constants.PREF_ALLOW_AUDIO_DURING_CALL, false)
-                locationSharingEnabled = context
-                    .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                    .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
-                lastLocationSentAt = context
-                    .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                    .getLong(Constants.PREF_LAST_LOCATION_SENT_AT, 0L)
-                locationStatus = context
-                    .getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                    .getString(Constants.PREF_LOCATION_STATUS, "") ?: ""
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -178,127 +158,6 @@ fun SetupGuideScreen(
             }
 
             item {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Call time audio", fontWeight = FontWeight.Bold)
-                            Text(
-                                text = if (allowAudioDuringCall) {
-                                    "Phone call chalu hoy to pan Factory Talk audio allow."
-                                } else {
-                                    "Phone call chalu hoy tyare Factory Talk audio block."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = allowAudioDuringCall,
-                            onCheckedChange = { checked ->
-                                allowAudioDuringCall = checked
-                                context.getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                                    .edit()
-                                    .putBoolean(Constants.PREF_ALLOW_AUDIO_DURING_CALL, checked)
-                                    .apply()
-                            }
-                        )
-                    }
-                }
-            }
-
-            item {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Duty location sharing", fontWeight = FontWeight.Bold)
-                            Text(
-                                text = if (locationSharingEnabled) {
-                                    if (lastLocationSentAt > 0L) {
-                                        "Last location sent: ${formatSetupTime(lastLocationSentAt)}"
-                                    } else {
-                                        val status = locationStatus.ifBlank { "Waiting for GPS/location fix" }
-                                        "$status. Phone Location/GPS ON karo, Location permission allow karo ane app 30 sec khulli rakho."
-                                    }
-                                } else {
-                                    "OFF hoy tyare admin ne aa phone nu location moklavama nahi ave."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = locationSharingEnabled,
-                            onCheckedChange = { checked ->
-                                locationSharingEnabled = checked
-                                context.getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                                    .edit()
-                                    .putBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, checked)
-                                    .apply()
-
-                                if (checked && !PermissionHelper.hasLocationPermission(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                    var currentContext = context
-                                    while (currentContext is android.content.ContextWrapper) {
-                                        if (currentContext is Activity) break
-                                        currentContext = currentContext.baseContext
-                                    }
-                                    (currentContext as? Activity)?.let {
-                                        androidx.core.app.ActivityCompat.requestPermissions(
-                                            it,
-                                            arrayOf(
-                                                android.Manifest.permission.ACCESS_FINE_LOCATION,
-                                                android.Manifest.permission.ACCESS_COARSE_LOCATION
-                                            ),
-                                            101
-                                        )
-                                    }
-                                }
-
-                                val serviceIntent = Intent(context, TalkForegroundService::class.java).apply {
-                                    action = Constants.ACTION_START_SERVICE
-                                }
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                    context.startForegroundService(serviceIntent)
-                                } else {
-                                    context.startService(serviceIntent)
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-
-            item {
-                if (locationSharingEnabled && lastLocationSentAt == 0L) {
-                    Button(
-                        onClick = {
-                            context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Open Phone Location Settings")
-                    }
-                }
-            }
-
-            item {
                 SetupStepItem(
                     title = "App Permissions",
                     description = "Allow Microphone, Notifications, Nearby devices/Bluetooth, and network access.",
@@ -360,10 +219,6 @@ fun SetupGuideScreen(
             }
         }
     }
-}
-
-private fun formatSetupTime(timestamp: Long): String {
-    return SimpleDateFormat("hh:mm:ss a", Locale.getDefault()).format(Date(timestamp))
 }
 
 @Composable
