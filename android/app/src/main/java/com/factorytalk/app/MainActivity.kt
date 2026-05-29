@@ -11,6 +11,8 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import com.factorytalk.app.ui.navigation.Screen
 import com.factorytalk.app.ui.screens.AdminScreen
 import com.factorytalk.app.ui.screens.HomeScreen
@@ -84,8 +86,19 @@ fun FactoryTalkApp(startDestination: String) {
             )
         }
         
-        composable(Screen.PrivateTalk.route) {
-            PrivateTalkScreen()
+        composable(
+            route = Screen.PrivateTalk.ROUTE,
+            arguments = listOf(
+                navArgument("targetUserId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
+        ) { backStackEntry ->
+            PrivateTalkScreen(
+                initialTargetUserId = backStackEntry.arguments?.getString("targetUserId")
+            )
         }
         
         composable(Screen.Admin.route) {
@@ -99,7 +112,11 @@ fun FactoryTalkApp(startDestination: String) {
         }
         
         composable(Screen.UserList.route) {
-            UserListScreen()
+            UserListScreen(
+                onPrivateTalkClick = { userId ->
+                    navController.navigate(Screen.PrivateTalk.createRoute(userId))
+                }
+            )
         }
     }
 }

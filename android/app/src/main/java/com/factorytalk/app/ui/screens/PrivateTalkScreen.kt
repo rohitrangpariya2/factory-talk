@@ -36,6 +36,7 @@ import com.factorytalk.app.util.Constants
 
 @Composable
 fun PrivateTalkScreen(
+    initialTargetUserId: String? = null,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -44,7 +45,7 @@ fun PrivateTalkScreen(
     val onlineUsers by viewModel.onlineUsers.collectAsState()
     val floorState by viewModel.floorState.collectAsState()
     val talkDuration by viewModel.talkDurationSeconds.collectAsState()
-    var selectedUserId by remember { mutableStateOf<String?>(null) }
+    var selectedUserId by remember(initialTargetUserId) { mutableStateOf(initialTargetUserId) }
     val walkieEnabled = remember {
         context.getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
             .getBoolean(Constants.PREF_WALKIE_ENABLED, true)

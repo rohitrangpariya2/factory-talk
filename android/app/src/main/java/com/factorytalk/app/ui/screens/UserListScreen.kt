@@ -38,6 +38,7 @@ class UserListViewModel @Inject constructor(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UserListScreen(
+    onPrivateTalkClick: (String) -> Unit,
     viewModel: UserListViewModel = hiltViewModel()
 ) {
     val onlineUsers by viewModel.onlineUsers.collectAsState()
@@ -90,7 +91,7 @@ fun UserListScreen(
             items(onlineUsers, key = { it.id }) { user ->
                 UserListItem(
                     user = user,
-                    onPrivateTalkClick = {}
+                    onPrivateTalkClick = { onPrivateTalkClick(user.id) }
                 )
             }
         }
