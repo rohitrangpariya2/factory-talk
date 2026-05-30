@@ -8,7 +8,7 @@ import './config/firebase'; // Initialize Firebase
 import authRoutes from './api/routes/auth';
 import userRoutes from './api/routes/users';
 import channelRoutes from './api/routes/channels';
-import { getLatestLocations, setupSocketHandler } from './signaling/socketHandler';
+import { getLatestLocations, getLocationHistory, setupSocketHandler } from './signaling/socketHandler';
 
 const app = express();
 const server = http.createServer(app);
@@ -38,6 +38,11 @@ app.get('/health', (req, res) => {
 
 app.get('/locations', (req, res) => {
   res.status(200).json({ locations: getLatestLocations() });
+});
+
+app.get('/locations/history', (req, res) => {
+  const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
+  res.status(200).json({ history: getLocationHistory(userId) });
 });
 
 app.get(['/map', '/map/:userId'], (req, res) => {
@@ -155,6 +160,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }).addTo(map);
     const markers = new Map();
     const circles = new Map();
+    const historyLines = new Map();
     let firstFix = true;
 
     function escapeText(value) {
@@ -200,6 +206,43 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         '<a style="color:#38bdf8" target="_blank" rel="noopener" href="' + mapsUrl + '">Open in Google Maps</a>';
     }
 
+    function updateHistory(points) {
+      const grouped = new Map();
+      points.forEach((point) => {
+        if (!Number.isFinite(Number(point.latitude)) || !Number.isFinite(Number(point.longitude))) return;
+        if (userId && point.userId !== userId) return;
+        if (!grouped.has(point.userId)) grouped.set(point.userId, []);
+        grouped.get(point.userId).push(point);
+      });
+
+      grouped.forEach((userPoints, key) => {
+        userPoints.sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+        const latLngs = userPoints.map((point) => [point.latitude, point.longitude]);
+        if (latLngs.length < 2) return;
+        const last = userPoints[userPoints.length - 1];
+        const color = statusFor(last).color;
+        if (!historyLines.has(key)) {
+          historyLines.set(key, L.polyline(latLngs, {
+            color,
+            weight: 4,
+            opacity: 0.75,
+            lineCap: 'round',
+            lineJoin: 'round'
+          }).addTo(map));
+        } else {
+          historyLines.get(key).setLatLngs(latLngs);
+          historyLines.get(key).setStyle({ color });
+        }
+      });
+
+      historyLines.forEach((line, key) => {
+        if (!grouped.has(key)) {
+          map.removeLayer(line);
+          historyLines.delete(key);
+        }
+      });
+    }
+
     function updateMap(location) {
       const key = location.userId;
       const latLng = [location.latitude, location.longitude];
@@ -230,7 +273,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }
     }
 
-    function renderList(locations) {
+    function renderList(locations, historyCounts) {
       const list = document.getElementById('userList');
       if (!locations.length) {
         list.innerHTML = '<div class="muted">Koi phone nu location haju receive nathi thayu.</div>';
@@ -239,12 +282,13 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       list.innerHTML = locations.map((location) => {
         const status = statusFor(location);
         const accuracy = location.accuracy ? Math.round(location.accuracy) + 'm' : 'unknown';
+        const pointCount = historyCounts.get(location.userId) || 0;
         const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + location.latitude + ',' + location.longitude;
         return '<div class="user">' +
           '<div>' +
             '<div style="font-weight:800">' + escapeText(location.name || 'Factory Phone') + '</div>' +
             '<div class="muted"><span class="dot" style="background:' + status.color + '"></span> ' +
-              status.label + ' - ' + timeAgo(location) + ' - ' + escapeText(accuracy) + '</div>' +
+              status.label + ' - ' + timeAgo(location) + ' - ' + escapeText(accuracy) + ' - Trail ' + pointCount + '</div>' +
           '</div>' +
           '<div style="display:flex;gap:6px;align-items:center">' +
             '<button onclick="focusUser(\\'' + escapeText(location.userId) + '\\')">Track</button>' +
@@ -264,19 +308,28 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     async function refresh() {
       try {
         const response = await fetch('/locations', { cache: 'no-store' });
+        const historyResponse = await fetch('/locations/history' + (userId ? '?userId=' + encodeURIComponent(userId) : ''), { cache: 'no-store' });
         const data = await response.json();
+        const historyData = await historyResponse.json();
         const locations = (data.locations || [])
           .filter((item) => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)))
           .sort((a, b) => Number(b.locationUpdatedAt || 0) - Number(a.locationUpdatedAt || 0));
+        const historyPoints = historyData.history || [];
+        const historyCounts = new Map();
+        historyPoints.forEach((point) => {
+          historyCounts.set(point.userId, (historyCounts.get(point.userId) || 0) + 1);
+        });
         document.getElementById('serverDot').style.background = '#22c55e';
         document.getElementById('serverText').textContent = 'Online';
-        document.getElementById('summary').textContent = locations.length + ' phone location' + (locations.length === 1 ? '' : 's');
+        document.getElementById('summary').textContent =
+          locations.length + ' live, ' + historyPoints.length + ' history points';
         if (!locations.length) {
-          renderList([]);
+          renderList([], historyCounts);
           return;
         }
+        updateHistory(historyPoints);
         locations.forEach(updateMap);
-        renderList(locations);
+        renderList(locations, historyCounts);
         if (firstFix) {
           const selected = locations.find((item) => item.userId === userId) || locations[0];
           map.setView([selected.latitude, selected.longitude], 17);

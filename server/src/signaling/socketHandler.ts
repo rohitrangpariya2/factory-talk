@@ -11,7 +11,7 @@ import { buildAudioRelayEvent } from './audioRelay';
 
 let reminderSchedule: { onTime: string; offTime: string } | null = null;
 const busyDisconnectGraceTimers = new Map<string, NodeJS.Timeout>();
-const latestLocations = new Map<string, {
+type TrackedLocation = {
   userId: string;
   name: string;
   role: UserRole;
@@ -21,10 +21,45 @@ const latestLocations = new Map<string, {
   isBusy?: boolean;
   receivedAt?: number;
   locationUpdatedAt: number;
-}>();
+};
+
+type LocationHistoryPoint = TrackedLocation & {
+  sequence: number;
+};
+
+const latestLocations = new Map<string, TrackedLocation>();
+const locationHistory = new Map<string, LocationHistoryPoint[]>();
+const LOCATION_HISTORY_MAX_POINTS = 300;
+const LOCATION_HISTORY_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+let locationHistorySequence = 0;
 
 export function getLatestLocations() {
   return Array.from(latestLocations.values());
+}
+
+export function getLocationHistory(userId?: string) {
+  if (userId) {
+    return locationHistory.get(userId) ?? [];
+  }
+  return Array.from(locationHistory.values()).flat();
+}
+
+function appendLocationHistory(location: TrackedLocation) {
+  const points = locationHistory.get(location.userId) ?? [];
+  const lastPoint = points[points.length - 1];
+  const movedEnough = !lastPoint ||
+    Math.abs(lastPoint.latitude - location.latitude) > 0.00003 ||
+    Math.abs(lastPoint.longitude - location.longitude) > 0.00003;
+  const waitedEnough = !lastPoint || location.locationUpdatedAt - lastPoint.locationUpdatedAt >= 30_000;
+
+  if (!movedEnough && !waitedEnough) return;
+
+  const cutoff = Date.now() - LOCATION_HISTORY_MAX_AGE_MS;
+  const nextPoints = points
+    .filter((point) => point.locationUpdatedAt >= cutoff)
+    .concat({ ...location, sequence: ++locationHistorySequence })
+    .slice(-LOCATION_HISTORY_MAX_POINTS);
+  locationHistory.set(location.userId, nextPoints);
 }
 
 export function setupSocketHandler(io: Server) {
@@ -164,7 +199,7 @@ export function setupSocketHandler(io: Server) {
       user.latitude = latitude;
       user.longitude = longitude;
       user.locationUpdatedAt = fixTime;
-      latestLocations.set(user.userId, {
+      const trackedLocation: TrackedLocation = {
         userId: user.userId,
         name: user.userName,
         role: user.role,
@@ -174,19 +209,11 @@ export function setupSocketHandler(io: Server) {
         isBusy: !!user.isBusy,
         receivedAt: now,
         locationUpdatedAt: user.locationUpdatedAt
-      });
+      };
+      latestLocations.set(user.userId, trackedLocation);
+      appendLocationHistory(trackedLocation);
 
-      io.emit('user_location_updated', {
-        userId: user.userId,
-        name: user.userName,
-        role: user.role,
-        latitude: user.latitude,
-        longitude: user.longitude,
-        accuracy: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : undefined,
-        isBusy: !!user.isBusy,
-        receivedAt: now,
-        locationUpdatedAt: user.locationUpdatedAt
-      });
+      io.emit('user_location_updated', trackedLocation);
     });
 
     socket.on('audio_chunk', (payload) => {
