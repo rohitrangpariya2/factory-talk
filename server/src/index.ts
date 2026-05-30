@@ -181,6 +181,27 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       text-decoration: none;
       font-weight: 700;
     }
+    .report-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin: 8px 0 10px;
+    }
+    .report-box {
+      border-radius: 8px;
+      background: rgba(255,255,255,.055);
+      padding: 8px;
+    }
+    .report-label {
+      color: #c7ccd8;
+      font-size: 11px;
+      line-height: 1.2;
+    }
+    .report-value {
+      color: #ffffff;
+      font-weight: 900;
+      margin-top: 2px;
+    }
     .marker-pin {
       width: 18px;
       height: 18px;
@@ -293,6 +314,17 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return (meters / 1000).toFixed(2) + ' km';
     }
 
+    function speedKmh(distanceMetersValue, durationMs) {
+      const hours = Number(durationMs || 0) / 3600000;
+      if (hours <= 0) return 0;
+      return (Number(distanceMetersValue || 0) / 1000) / hours;
+    }
+
+    function formatSpeed(kmh) {
+      if (!Number.isFinite(kmh) || kmh <= 0) return '0 km/h';
+      return Math.round(kmh) + ' km/h';
+    }
+
     function makeIcon(color) {
       return L.divIcon({
         className: '',
@@ -399,7 +431,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const list = document.getElementById('userList');
       if (!locations.length) {
         list.innerHTML = '<div class="muted">Koi phone nu location haju receive nathi thayu.</div>';
-        renderTimeline(historyPoints || []);
+        renderTripReport(historyPoints || []);
         return;
       }
       list.innerHTML = locations.map((location) => {
@@ -419,61 +451,146 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           '</div>' +
         '</div>';
       }).join('');
-      renderTimeline(historyPoints || []);
+      renderTripReport(historyPoints || []);
     }
 
-    function renderTimeline(points) {
+    function renderTripReport(points) {
       const timeline = document.getElementById('timeline');
       if (!selectedTimelineUserId) {
-        timeline.innerHTML = '<div class="timeline-title">Location History</div><div class="muted">User par Track dabavo, pachi simple history dekhase.</div>';
+        timeline.innerHTML = '<div class="timeline-title">Trip Report</div><div class="muted">User par Track dabavo, pachi trip summary dekhase.</div>';
         return;
       }
 
-      const userPoints = points
+      const userPoints = simplifyPoints(points
         .filter((point) => point.userId === selectedTimelineUserId)
         .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
-        .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+        .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0)));
 
-      if (!userPoints.length) {
-        timeline.innerHTML = '<div class="timeline-title">Location History</div><div class="muted">Aa user ni saved history haju nathi. Phone move thase pachi points add thase.</div>';
+      if (userPoints.length < 2) {
+        timeline.innerHTML = '<div class="timeline-title">Trip Report</div><div class="muted">Aa user ni trip report mate ochha points che. Phone move thase pachi report banse.</div>';
         return;
       }
 
       const selectedName = escapeText(userPoints[userPoints.length - 1].name || 'Factory Phone');
-      const latestPoints = userPoints.slice(-25).reverse();
-      const rows = latestPoints.map((point) => {
-        const chronologicalIndex = userPoints.indexOf(point);
-        const nextPoint = userPoints[chronologicalIndex + 1];
-        const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + point.latitude + ',' + point.longitude;
-        const latLng = Number(point.latitude).toFixed(5) + ', ' + Number(point.longitude).toFixed(5);
-        const accuracy = point.accuracy ? Math.round(Number(point.accuracy)) + 'm accuracy' : 'accuracy unknown';
-        let chip = 'Latest';
-        let main = 'Aa current/latest location che.';
-        let detail = 'Location: ' + latLng + ' - ' + accuracy;
-        if (nextPoint) {
-          const gap = Number(nextPoint.locationUpdatedAt || 0) - Number(point.locationUpdatedAt || 0);
-          const distance = distanceMeters(point, nextPoint);
-          if (distance < 50) {
-            chip = 'Stopped';
-            main = 'Aa jagya par lagbhag ' + formatDuration(gap) + ' rokayo.';
-            detail = 'Same area ma movement 50m thi ochhu. ' + accuracy;
-          } else {
-            chip = 'Moved';
-            main = 'Ahiya thi next point sudhi ' + formatDistance(distance) + ' gayo.';
-            detail = 'Time lagyo: ' + formatDuration(gap) + '. Location: ' + latLng;
-          }
+      const report = buildTripReport(userPoints);
+      const expectedSlowMs = report.distanceMeters / 20 * 3600000 / 1000;
+      const expectedFastMs = report.distanceMeters / 30 * 3600000 / 1000;
+      const expectedText = formatDuration(expectedFastMs) + ' - ' + formatDuration(expectedSlowMs);
+      const directText = report.stops.length
+        ? 'Vachhe ' + report.stops.length + ' stop'
+        : 'Direct gayo, major stop nathi';
+
+      const stopRows = report.stops.length
+        ? report.stops.map((stop, index) => {
+            const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + stop.latitude + ',' + stop.longitude;
+            return '<div class="timeline-item">' +
+              '<div class="timeline-time">Stop ' + (index + 1) + ' - ' + escapeText(formatClock(stop.startTime)) + '</div>' +
+              '<div class="timeline-chip">Stopped</div>' +
+              '<div class="timeline-main">Aa jagya par ' + escapeText(formatDuration(stop.durationMs)) + ' ubho ryo.</div>' +
+              '<div class="timeline-meta">Location: ' + Number(stop.latitude).toFixed(5) + ', ' + Number(stop.longitude).toFixed(5) + '</div>' +
+              '<div class="timeline-meta"><a class="timeline-link" target="_blank" rel="noopener" href="' + mapsUrl + '">Stop Google Map ma kholo</a></div>' +
+            '</div>';
+          }).join('')
+        : '<div class="timeline-item"><div class="timeline-main">Vachhe koi major stop detect nathi thayu.</div><div class="timeline-meta">3 min thi vadhu same area ma rokay to stop count thase.</div></div>';
+
+      timeline.innerHTML =
+        '<div class="timeline-title">Trip Report - ' + selectedName + '</div>' +
+        '<div class="timeline-main">' + escapeText(directText) + '</div>' +
+        '<div class="report-grid">' +
+          reportBox('Start', formatClock(report.startTime)) +
+          reportBox('Last point', formatClock(report.endTime)) +
+          reportBox('Actual time', formatDuration(report.totalTimeMs)) +
+          reportBox('Expected bike time', expectedText) +
+          reportBox('Distance', formatDistance(report.distanceMeters)) +
+          reportBox('Moving time', formatDuration(report.movingTimeMs)) +
+          reportBox('Avg speed', formatSpeed(report.avgSpeedKmh)) +
+          reportBox('Max speed', formatSpeed(report.maxSpeedKmh)) +
+        '</div>' +
+        '<div class="timeline-title">Stops</div>' +
+        stopRows;
+    }
+
+    function reportBox(label, value) {
+      return '<div class="report-box"><div class="report-label">' + escapeText(label) + '</div><div class="report-value">' + escapeText(value) + '</div></div>';
+    }
+
+    function simplifyPoints(points) {
+      const simplified = [];
+      points.forEach((point) => {
+        const last = simplified[simplified.length - 1];
+        if (!last || Math.abs(Number(point.locationUpdatedAt || 0) - Number(last.locationUpdatedAt || 0)) >= 15000 || distanceMeters(last, point) >= 25) {
+          simplified.push(point);
         }
+      });
+      return simplified;
+    }
 
-        return '<div class="timeline-item">' +
-          '<div class="timeline-time">' + escapeText(formatClock(point.locationUpdatedAt)) + '</div>' +
-          '<div class="timeline-chip">' + escapeText(chip) + '</div>' +
-          '<div class="timeline-main">' + escapeText(main) + '</div>' +
-          '<div class="timeline-meta">' + escapeText(detail) + '</div>' +
-          '<div class="timeline-meta"><a class="timeline-link" target="_blank" rel="noopener" href="' + mapsUrl + '">Aa point Google Map ma kholo</a></div>' +
-        '</div>';
-      }).join('');
+    function buildTripReport(points) {
+      let distance = 0;
+      let movingTime = 0;
+      let maxSpeed = 0;
+      const stops = [];
+      let stopStart = null;
+      let stopAnchor = null;
 
-      timeline.innerHTML = '<div class="timeline-title">Location History - ' + selectedName + '</div>' + rows;
+      for (let i = 0; i < points.length - 1; i++) {
+        const current = points[i];
+        const next = points[i + 1];
+        const gap = Math.max(0, Number(next.locationUpdatedAt || 0) - Number(current.locationUpdatedAt || 0));
+        const segmentDistance = distanceMeters(current, next);
+        const segmentSpeed = speedKmh(segmentDistance, gap);
+        if (segmentSpeed > maxSpeed && segmentSpeed < 120) maxSpeed = segmentSpeed;
+
+        if (segmentDistance < 60) {
+          if (!stopStart) {
+            stopStart = Number(current.locationUpdatedAt || 0);
+            stopAnchor = current;
+          }
+        } else {
+          distance += segmentDistance;
+          movingTime += gap;
+          if (stopStart && stopAnchor) {
+            const duration = Number(current.locationUpdatedAt || 0) - stopStart;
+            if (duration >= 3 * 60 * 1000) {
+              stops.push({
+                latitude: stopAnchor.latitude,
+                longitude: stopAnchor.longitude,
+                startTime: stopStart,
+                durationMs: duration
+              });
+            }
+          }
+          stopStart = null;
+          stopAnchor = null;
+        }
+      }
+
+      const last = points[points.length - 1];
+      if (stopStart && stopAnchor) {
+        const duration = Number(last.locationUpdatedAt || 0) - stopStart;
+        if (duration >= 3 * 60 * 1000) {
+          stops.push({
+            latitude: stopAnchor.latitude,
+            longitude: stopAnchor.longitude,
+            startTime: stopStart,
+            durationMs: duration
+          });
+        }
+      }
+
+      const startTime = Number(points[0].locationUpdatedAt || 0);
+      const endTime = Number(last.locationUpdatedAt || 0);
+      const totalTimeMs = Math.max(0, endTime - startTime);
+      return {
+        startTime,
+        endTime,
+        totalTimeMs,
+        distanceMeters: distance,
+        movingTimeMs: movingTime,
+        avgSpeedKmh: speedKmh(distance, movingTime || totalTimeMs),
+        maxSpeedKmh: maxSpeed,
+        stops
+      };
     }
 
     window.focusUser = function(id) {
