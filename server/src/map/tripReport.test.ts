@@ -22,6 +22,7 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('function openTripOnMap(index)');
     expect(indexSource).toContain('function drawTripOnMap(trip, index)');
     expect(indexSource).toContain('function showLiveMap()');
+    expect(indexSource).toContain('const tripRouteCache = new Map()');
     expect(indexSource).toContain('Aaj ni trips');
     expect(indexSource).toContain('Map ma kholo');
     expect(indexSource).toContain("reportBox('Trip km'");

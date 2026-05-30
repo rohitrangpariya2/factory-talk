@@ -336,6 +336,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const circles = new Map();
     const historyLines = new Map();
     const tripLayers = L.layerGroup().addTo(map);
+    const tripRouteCache = new Map();
     let savedHistory = [];
     let lastHistoryPoints = [];
     let currentTrips = [];
@@ -850,9 +851,15 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }).addTo(tripLayers).bindPopup(title + '<br>' + formatDistance(report.distanceMeters));
 
       const roadPoints = sampleRoadTrailPoints(trip.points);
-      if (roadPoints.length > 1) {
+      const cachedRoute = tripRouteCache.get(signature);
+      if (cachedRoute && cachedRoute.length > 1) {
+        routeLine.setLatLngs(cachedRoute);
+      } else if (roadPoints.length > 1) {
         fetchRoadLatLngs(roadPoints)
           .then((roadLatLngs) => {
+            if (roadLatLngs.length > 1) {
+              tripRouteCache.set(signature, roadLatLngs);
+            }
             if (selectedTripSignature === signature && roadLatLngs.length > 1) {
               routeLine.setLatLngs(roadLatLngs);
             }
