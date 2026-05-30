@@ -159,6 +159,23 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       line-height: 1.45;
       margin-top: 3px;
     }
+    .timeline-main {
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.45;
+      margin-top: 5px;
+    }
+    .timeline-chip {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      margin-top: 5px;
+      background: rgba(29,155,240,.16);
+      color: #7dd3fc;
+      font-size: 12px;
+      font-weight: 800;
+    }
     .timeline-link {
       color: #38bdf8;
       text-decoration: none;
@@ -408,7 +425,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     function renderTimeline(points) {
       const timeline = document.getElementById('timeline');
       if (!selectedTimelineUserId) {
-        timeline.innerHTML = '<div class="timeline-title">History Timeline</div><div class="muted">Track dabavo pachi user ni point-wise history dekhase.</div>';
+        timeline.innerHTML = '<div class="timeline-title">Location History</div><div class="muted">User par Track dabavo, pachi simple history dekhase.</div>';
         return;
       }
 
@@ -418,7 +435,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
 
       if (!userPoints.length) {
-        timeline.innerHTML = '<div class="timeline-title">History Timeline</div><div class="muted">Aa user ni saved history haju nathi.</div>';
+        timeline.innerHTML = '<div class="timeline-title">Location History</div><div class="muted">Aa user ni saved history haju nathi. Phone move thase pachi points add thase.</div>';
         return;
       }
 
@@ -430,24 +447,33 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + point.latitude + ',' + point.longitude;
         const latLng = Number(point.latitude).toFixed(5) + ', ' + Number(point.longitude).toFixed(5);
         const accuracy = point.accuracy ? Math.round(Number(point.accuracy)) + 'm accuracy' : 'accuracy unknown';
-        let movement = 'Latest point';
+        let chip = 'Latest';
+        let main = 'Aa current/latest location che.';
+        let detail = 'Location: ' + latLng + ' - ' + accuracy;
         if (nextPoint) {
           const gap = Number(nextPoint.locationUpdatedAt || 0) - Number(point.locationUpdatedAt || 0);
           const distance = distanceMeters(point, nextPoint);
-          movement = distance < 50
-            ? 'Hold: ' + formatDuration(gap) + ' in same area'
-            : 'Next point: ' + formatDuration(gap) + ', ' + formatDistance(distance);
+          if (distance < 50) {
+            chip = 'Stopped';
+            main = 'Aa jagya par lagbhag ' + formatDuration(gap) + ' rokayo.';
+            detail = 'Same area ma movement 50m thi ochhu. ' + accuracy;
+          } else {
+            chip = 'Moved';
+            main = 'Ahiya thi next point sudhi ' + formatDistance(distance) + ' gayo.';
+            detail = 'Time lagyo: ' + formatDuration(gap) + '. Location: ' + latLng;
+          }
         }
 
         return '<div class="timeline-item">' +
           '<div class="timeline-time">' + escapeText(formatClock(point.locationUpdatedAt)) + '</div>' +
-          '<div class="timeline-meta">Where: ' + escapeText(latLng) + ' - ' + escapeText(accuracy) + '</div>' +
-          '<div class="timeline-meta">' + escapeText(movement) + '</div>' +
-          '<div class="timeline-meta"><a class="timeline-link" target="_blank" rel="noopener" href="' + mapsUrl + '">Open this point</a></div>' +
+          '<div class="timeline-chip">' + escapeText(chip) + '</div>' +
+          '<div class="timeline-main">' + escapeText(main) + '</div>' +
+          '<div class="timeline-meta">' + escapeText(detail) + '</div>' +
+          '<div class="timeline-meta"><a class="timeline-link" target="_blank" rel="noopener" href="' + mapsUrl + '">Aa point Google Map ma kholo</a></div>' +
         '</div>';
       }).join('');
 
-      timeline.innerHTML = '<div class="timeline-title">History Timeline - ' + selectedName + '</div>' + rows;
+      timeline.innerHTML = '<div class="timeline-title">Location History - ' + selectedName + '</div>' + rows;
     }
 
     window.focusUser = function(id) {
