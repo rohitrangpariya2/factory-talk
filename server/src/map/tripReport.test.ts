@@ -33,4 +33,10 @@ describe('factory trip report map script', () => {
     expect(indexSource).not.toContain("reportBox('Avg speed'");
     expect(indexSource).not.toContain("reportBox('Max speed'");
   });
+
+  test('uses server receive time for live location freshness', () => {
+    expect(indexSource).toContain('function freshnessMs(location)');
+    expect(indexSource).toContain('Number(location.receivedAt || location.locationUpdatedAt || 0)');
+    expect(indexSource).toContain('if (freshnessMs(location) > 120000)');
+  });
 });

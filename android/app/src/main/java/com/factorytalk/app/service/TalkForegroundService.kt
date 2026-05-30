@@ -71,6 +71,9 @@ class TalkForegroundService : Service() {
     private var locationJob: Job? = null
     private var locationListener: LocationListener? = null
     private var lastKnownLocation: Location? = null
+    private var hasSentFreshLocation = false
+    private var lastStaleLocationHeartbeatAt = 0L
+    private var locationProvidersAvailable = false
     private var isTalking = false
     private var lastCallBusyStatus = false
     private var explicitStopRequested = false
@@ -259,11 +262,11 @@ class TalkForegroundService : Service() {
                     if (locationListener == null) {
                         startForegroundServiceWithNotification()
                     }
-                    if (isLastLocationStale(45_000L)) {
+                    if (isLastLocationStale(Constants.LOCATION_STALE_RESTART_MS)) {
                         stopLocationUpdates()
                     }
                     startLocationUpdates()
-                    sendLastKnownLocation()
+                    sendLastKnownLocation(allowStaleHeartbeat = true)
                 } else {
                     if (enabled) updateLocationStatus("Location permission missing")
                     stopLocationUpdates()
@@ -278,6 +281,7 @@ class TalkForegroundService : Service() {
         val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
             .filter { provider -> runCatching { locationManager.isProviderEnabled(provider) }.getOrDefault(false) }
+        locationProvidersAvailable = providers.isNotEmpty()
         loadLastKnownLocation(locationManager)
         if (providers.isEmpty()) {
             updateLocationStatus("Phone Location/GPS is OFF")
@@ -332,19 +336,39 @@ class TalkForegroundService : Service() {
         locationListener = null
     }
 
-    private fun sendLastKnownLocation() {
+    private fun sendLastKnownLocation(allowStaleHeartbeat: Boolean = false) {
         val location = lastKnownLocation ?: return
-        if (isLocationStale(location, 120_000L)) {
-            updateLocationStatus("Waiting for fresh GPS/location fix")
+        val now = System.currentTimeMillis()
+        val isFreshLocation = !isLocationStale(location, Constants.LOCATION_FIX_STALE_MS)
+        if (!isFreshLocation) {
+            if (
+                !allowStaleHeartbeat ||
+                !hasSentFreshLocation ||
+                !locationProvidersAvailable ||
+                now - lastStaleLocationHeartbeatAt < Constants.LOCATION_HEARTBEAT_INTERVAL_MS
+            ) {
+                updateLocationStatus("Waiting for fresh GPS/location fix")
+                return
+            }
+
+            signalingClient.sendLocation(location.latitude, location.longitude, location.accuracy)
+            lastStaleLocationHeartbeatAt = now
+            saveLocationSent(location, "Last location heartbeat sent")
             return
         }
+
         signalingClient.sendLocation(location.latitude, location.longitude, location.accuracy, location.time)
+        hasSentFreshLocation = true
+        saveLocationSent(location, "Location sent")
+    }
+
+    private fun saveLocationSent(location: Location, status: String) {
         getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putLong(Constants.PREF_LAST_LOCATION_SENT_AT, System.currentTimeMillis())
             .putString(Constants.PREF_LAST_LOCATION_LATITUDE, location.latitude.toString())
             .putString(Constants.PREF_LAST_LOCATION_LONGITUDE, location.longitude.toString())
-            .putString(Constants.PREF_LOCATION_STATUS, "Location sent")
+            .putString(Constants.PREF_LOCATION_STATUS, status)
             .apply()
     }
 

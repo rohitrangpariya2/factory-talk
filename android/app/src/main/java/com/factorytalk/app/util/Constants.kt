@@ -66,6 +66,9 @@ object Constants {
     const val PREF_DEVICE_IS_ADMIN = "device_is_admin"
     const val PREF_ADMIN_PIN = "admin_pin"
     const val DEFAULT_ADMIN_PIN = "1234"
+    const val LOCATION_STALE_RESTART_MS = 45_000L
+    const val LOCATION_FIX_STALE_MS = 120_000L
+    const val LOCATION_HEARTBEAT_INTERVAL_MS = 30_000L
     
     // PTT Config
     const val MAX_TALK_DURATION_SECONDS = 60

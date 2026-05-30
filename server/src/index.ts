@@ -355,9 +355,13 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return Math.max(0, Date.now() - Number(location.locationUpdatedAt || 0));
     }
 
+    function freshnessMs(location) {
+      return Math.max(0, Date.now() - Number(location.receivedAt || location.locationUpdatedAt || 0));
+    }
+
     function statusFor(location) {
       if (location.isBusy) return { label: 'Busy', color: '#f59e0b' };
-      if (ageMs(location) > 120000) return { label: 'Old location', color: '#94a3b8' };
+      if (freshnessMs(location) > 120000) return { label: 'Old location', color: '#94a3b8' };
       return { label: 'Live', color: '#22c55e' };
     }
 
