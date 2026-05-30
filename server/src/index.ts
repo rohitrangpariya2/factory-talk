@@ -507,13 +507,58 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }
 
       const selectedName = escapeText(userPoints[userPoints.length - 1].name || 'Factory Phone');
-      const report = buildTripReport(userPoints);
+      const trips = splitFactoryTrips(userPoints);
+      if (!trips.length) {
+        timeline.innerHTML = '<div class="timeline-title">Trip Report - ' + selectedName + '</div>' +
+          '<div class="muted">Aa user haju factory zone mathi bahar nikalyo nathi. Factory thi bahar jashe tyare Trip 1 start thase.</div>';
+        return;
+      }
+
+      timeline.innerHTML =
+        '<div class="timeline-title">Trip Report - ' + selectedName + '</div>' +
+        renderTripSummary(buildTripSummary(trips)) +
+        trips.map(renderTripCard).join('');
+    }
+
+    function buildTripSummary(trips) {
+      return trips.reduce((summary, trip) => {
+        const report = buildTripReport(trip.points);
+        summary.totalTrips += trip.isComplete ? 1 : 0;
+        summary.activeTrips += trip.isComplete ? 0 : 1;
+        summary.totalDistanceMeters += report.distanceMeters;
+        summary.totalTimeMs += report.totalTimeMs;
+        return summary;
+      }, {
+        totalTrips: 0,
+        activeTrips: 0,
+        totalDistanceMeters: 0,
+        totalTimeMs: 0
+      });
+    }
+
+    function renderTripSummary(summary) {
+      return '<div class="timeline-item">' +
+        '<div class="timeline-time">Aaj no trip summary</div>' +
+        '<div class="report-grid">' +
+          reportBox('Total trips', String(summary.totalTrips)) +
+          reportBox('Active trips', String(summary.activeTrips)) +
+          reportBox('Total km', formatDistance(summary.totalDistanceMeters)) +
+          reportBox('Total time', formatDuration(summary.totalTimeMs)) +
+        '</div>' +
+      '</div>';
+    }
+
+    function renderTripCard(trip, index) {
+      const report = buildTripReport(trip.points);
       const expectedSlowMs = report.distanceMeters / 20 * 3600000 / 1000;
       const expectedFastMs = report.distanceMeters / 30 * 3600000 / 1000;
       const expectedText = formatDuration(expectedFastMs) + ' - ' + formatDuration(expectedSlowMs);
       const directText = report.stops.length
         ? 'Vachhe ' + report.stops.length + ' stop'
         : 'Direct gayo, major stop nathi';
+      const title = trip.isComplete ? 'Trip ' + (index + 1) : 'Active Trip';
+      const statusText = trip.isComplete ? 'Factory par pacho avyo' : 'Haju factory bahar che';
+      const endLabel = trip.isComplete ? 'Factory pacho avyo' : 'Last point';
 
       const stopRows = report.stops.length
         ? report.stops.map((stop, index) => {
@@ -528,21 +573,43 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           }).join('')
         : '<div class="timeline-item"><div class="timeline-main">Vachhe koi major stop detect nathi thayu.</div><div class="timeline-meta">1 min thi vadhu same area ma rokay to stop count thase.</div></div>';
 
-      timeline.innerHTML =
-        '<div class="timeline-title">Trip Report - ' + selectedName + '</div>' +
+      return '<div class="timeline-item">' +
+        '<div class="timeline-time">' + title + ' - ' + statusText + '</div>' +
         '<div class="timeline-main">' + escapeText(directText) + '</div>' +
         '<div class="report-grid">' +
-          reportBox('Start', formatClock(report.startTime)) +
-          reportBox('Last point', formatClock(report.endTime)) +
+          reportBox('Factory thi niklyo', formatClock(report.startTime)) +
+          reportBox(endLabel, formatClock(report.endTime)) +
           reportBox('Actual time', formatDuration(report.totalTimeMs)) +
           reportBox('Expected bike time', expectedText) +
-          reportBox('Distance', formatDistance(report.distanceMeters)) +
+          reportBox('Trip km', formatDistance(report.distanceMeters)) +
           reportBox('Moving time', formatDuration(report.movingTimeMs)) +
-          reportBox('Avg speed', formatSpeed(report.avgSpeedKmh)) +
-          reportBox('Max speed', formatSpeed(report.maxSpeedKmh)) +
         '</div>' +
+        renderTripRoutePoints(trip) +
         '<div class="timeline-title">Stops</div>' +
-        stopRows;
+        stopRows +
+      '</div>';
+    }
+
+    function renderTripRoutePoints(trip) {
+      const routePoints = trip.points.filter((point, index, points) => {
+        if (index === 0 || index === points.length - 1) return true;
+        if (isInsideFactoryZone(point)) return false;
+        const previous = points[index - 1];
+        return distanceMeters(previous, point) >= 250;
+      }).slice(0, 8);
+
+      return '<div class="timeline-title">Route points</div>' +
+        routePoints.map((point, index) => {
+          const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + point.latitude + ',' + point.longitude;
+          const pointLabel = index === 0
+            ? 'Factory start'
+            : (index === routePoints.length - 1 && trip.isComplete ? 'Factory return' : 'Point ' + index);
+          return '<div class="timeline-meta">' +
+            '<a class="timeline-link" target="_blank" rel="noopener" href="' + mapsUrl + '">' + escapeText(pointLabel) + '</a>' +
+            ' - ' + escapeText(formatClock(point.locationUpdatedAt)) +
+            ' - ' + Number(point.latitude).toFixed(5) + ', ' + Number(point.longitude).toFixed(5) +
+          '</div>';
+        }).join('');
     }
 
     function reportBox(label, value) {
@@ -560,10 +627,63 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return simplified;
     }
 
+    const RETURN_CONFIRM_MS = 60 * 1000;
+
+    function isInsideFactoryZone(point) {
+      return distanceMeters(point, {
+        latitude: factoryZone.latitude,
+        longitude: factoryZone.longitude
+      }) <= factoryZone.radiusMeters;
+    }
+
+    function splitFactoryTrips(points) {
+      const trips = [];
+      let currentTrip = null;
+      let previousPoint = null;
+      let returnStartedAt = 0;
+
+      points.forEach((point) => {
+        const pointTime = Number(point.locationUpdatedAt || 0);
+        const insideFactory = isInsideFactoryZone(point);
+
+        if (!currentTrip && !insideFactory) {
+          const startPoint = previousPoint && isInsideFactoryZone(previousPoint) ? previousPoint : point;
+          currentTrip = {
+            points: startPoint === point ? [point] : [startPoint, point],
+            startTime: Number(startPoint.locationUpdatedAt || pointTime),
+            endTime: pointTime,
+            isComplete: false
+          };
+        } else if (currentTrip) {
+          currentTrip.points.push(point);
+          currentTrip.endTime = pointTime;
+
+          if (insideFactory) {
+            if (!returnStartedAt) returnStartedAt = pointTime;
+            if (pointTime - returnStartedAt >= RETURN_CONFIRM_MS) {
+              currentTrip.isComplete = true;
+              trips.push(currentTrip);
+              currentTrip = null;
+              returnStartedAt = 0;
+            }
+          } else {
+            returnStartedAt = 0;
+          }
+        }
+
+        previousPoint = point;
+      });
+
+      if (currentTrip) {
+        trips.push(currentTrip);
+      }
+
+      return trips;
+    }
+
     function buildTripReport(points) {
       let distance = 0;
       let movingTime = 0;
-      let maxSpeed = 0;
       const stops = [];
       let stopStart = null;
       let stopAnchor = null;
@@ -573,8 +693,6 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         const next = points[i + 1];
         const gap = Math.max(0, Number(next.locationUpdatedAt || 0) - Number(current.locationUpdatedAt || 0));
         const segmentDistance = distanceMeters(current, next);
-        const segmentSpeed = speedKmh(segmentDistance, gap);
-        if (segmentSpeed > maxSpeed && segmentSpeed < 120) maxSpeed = segmentSpeed;
 
         if (segmentDistance < 60) {
           if (!stopStart) {
@@ -586,7 +704,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           movingTime += gap;
           if (stopStart && stopAnchor) {
             const duration = Number(current.locationUpdatedAt || 0) - stopStart;
-            if (duration >= 60 * 1000) {
+            if (duration >= 60 * 1000 && !isInsideFactoryZone(stopAnchor)) {
               stops.push({
                 latitude: stopAnchor.latitude,
                 longitude: stopAnchor.longitude,
@@ -603,7 +721,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const last = points[points.length - 1];
       if (stopStart && stopAnchor) {
         const duration = Number(last.locationUpdatedAt || 0) - stopStart;
-        if (duration >= 60 * 1000) {
+        if (duration >= 60 * 1000 && !isInsideFactoryZone(stopAnchor)) {
           stops.push({
             latitude: stopAnchor.latitude,
             longitude: stopAnchor.longitude,
@@ -622,8 +740,6 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         totalTimeMs,
         distanceMeters: distance,
         movingTimeMs: movingTime,
-        avgSpeedKmh: speedKmh(distance, movingTime || totalTimeMs),
-        maxSpeedKmh: maxSpeed,
         stops
       };
     }
