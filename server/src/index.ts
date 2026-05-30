@@ -9,6 +9,9 @@ import authRoutes from './api/routes/auth';
 import userRoutes from './api/routes/users';
 import channelRoutes from './api/routes/channels';
 import { buildFactoryZoneScript } from './map/factoryZone';
+import { buildOsrmRouteUrl, normalizeRoadRouteCoordinates } from './map/roadRoute';
+import { buildRoadTrailScript } from './map/roadTrail';
+import { buildStopMarkersScript } from './map/stopMarkers';
 import { getSavedLocationHistory } from './services/locationHistoryService';
 import { getLatestLocations, getLocationHistory, setupSocketHandler } from './signaling/socketHandler';
 
@@ -61,6 +64,32 @@ app.get('/locations/history/saved', async (req, res) => {
   } catch (error) {
     console.error('Failed to read saved location history:', error);
     res.status(500).json({ error: 'Failed to read saved location history' });
+  }
+});
+
+app.get('/road-route', async (req, res) => {
+  try {
+    const rawCoordinates = typeof req.query.coordinates === 'string' ? req.query.coordinates : '';
+    const coordinates = normalizeRoadRouteCoordinates(rawCoordinates);
+    if (!coordinates) {
+      res.status(400).json({ code: 'InvalidCoordinates' });
+      return;
+    }
+
+    const routeResponse = await fetch(buildOsrmRouteUrl(coordinates), {
+      headers: {
+        'User-Agent': 'FactoryTalk/1.0 (https://factory-talk-server.onrender.com)'
+      }
+    });
+    const body = await routeResponse.text();
+    res.setHeader('Cache-Control', 'private, max-age=20');
+    res
+      .status(routeResponse.status)
+      .type(routeResponse.headers.get('content-type') || 'application/json')
+      .send(body);
+  } catch (error) {
+    console.error('Failed to fetch road route:', error);
+    res.status(502).json({ code: 'RouteProxyFailed' });
   }
 });
 
@@ -247,6 +276,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       attribution: '&copy; OpenStreetMap'
     }).addTo(map);
     ${buildFactoryZoneScript()}
+    ${buildRoadTrailScript()}
+    ${buildStopMarkersScript()}
     const markers = new Map();
     const circles = new Map();
     const historyLines = new Map();
@@ -366,14 +397,16 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           historyLines.set(key, L.polyline(latLngs, {
             color,
             weight: 4,
-            opacity: 0.75,
+            opacity: 0.55,
             lineCap: 'round',
-            lineJoin: 'round'
+            lineJoin: 'round',
+            dashArray: '4 6'
           }).addTo(map));
         } else {
           historyLines.get(key).setLatLngs(latLngs);
-          historyLines.get(key).setStyle({ color });
+          historyLines.get(key).setStyle({ color, opacity: 0.55, dashArray: '4 6' });
         }
+        applyRoadTrail(key, userPoints, historyLines.get(key), color);
       });
 
       historyLines.forEach((line, key) => {
@@ -493,7 +526,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
               '<div class="timeline-meta"><a class="timeline-link" target="_blank" rel="noopener" href="' + mapsUrl + '">Stop Google Map ma kholo</a></div>' +
             '</div>';
           }).join('')
-        : '<div class="timeline-item"><div class="timeline-main">Vachhe koi major stop detect nathi thayu.</div><div class="timeline-meta">3 min thi vadhu same area ma rokay to stop count thase.</div></div>';
+        : '<div class="timeline-item"><div class="timeline-main">Vachhe koi major stop detect nathi thayu.</div><div class="timeline-meta">1 min thi vadhu same area ma rokay to stop count thase.</div></div>';
 
       timeline.innerHTML =
         '<div class="timeline-title">Trip Report - ' + selectedName + '</div>' +
@@ -553,7 +586,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           movingTime += gap;
           if (stopStart && stopAnchor) {
             const duration = Number(current.locationUpdatedAt || 0) - stopStart;
-            if (duration >= 3 * 60 * 1000) {
+            if (duration >= 60 * 1000) {
               stops.push({
                 latitude: stopAnchor.latitude,
                 longitude: stopAnchor.longitude,
@@ -570,7 +603,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const last = points[points.length - 1];
       if (stopStart && stopAnchor) {
         const duration = Number(last.locationUpdatedAt || 0) - stopStart;
-        if (duration >= 3 * 60 * 1000) {
+        if (duration >= 60 * 1000) {
           stops.push({
             latitude: stopAnchor.latitude,
             longitude: stopAnchor.longitude,
@@ -647,6 +680,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         document.getElementById('summary').textContent =
           locations.length + ' live, ' + historyPoints.length + ' history points';
         updateHistory(historyPoints);
+        updateStopMarkers(historyPoints);
         if (!locations.length) {
           renderList([], historyCounts, historyPoints);
           return;
