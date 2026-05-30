@@ -425,6 +425,14 @@ class TalkForegroundService : Service() {
                 sendLastKnownLocation()
                 updateNotification("Connected - Listening")
             }
+            is com.factorytalk.app.data.remote.SignalingEvent.LocationUpdateRequested -> {
+                val enabled = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
+                if (enabled && hasLocationPermission()) {
+                    startLocationUpdates()
+                    sendLastKnownLocation(allowStaleHeartbeat = true)
+                }
+            }
             is com.factorytalk.app.data.remote.SignalingEvent.FloorGranted -> {
                 floorControlManager.handleFloorGranted(
                     userId = event.userId,

@@ -39,4 +39,13 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('Number(location.receivedAt || location.locationUpdatedAt || 0)');
     expect(indexSource).toContain('if (freshnessMs(location) > 120000)');
   });
+
+  test('renders trip details in a collapsible bottom drawer', () => {
+    expect(indexSource).toContain('class="panel trip-drawer collapsed"');
+    expect(indexSource).toContain('id="tripDrawerHandle"');
+    expect(indexSource).toContain('let tripDrawerExpanded = false');
+    expect(indexSource).toContain('function setTripDrawerExpanded(expanded)');
+    expect(indexSource).toContain('function updateTripDrawerChrome(title, subtitle)');
+    expect(indexSource).toContain('timeline.classList.toggle');
+  });
 });

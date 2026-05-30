@@ -32,7 +32,9 @@ const latestLocations = new Map<string, TrackedLocation>();
 const locationHistory = new Map<string, LocationHistoryPoint[]>();
 const LOCATION_HISTORY_MAX_POINTS = 300;
 const LOCATION_HISTORY_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const LOCATION_RECOVERY_REQUEST_INTERVAL_MS = 15_000;
 let locationHistorySequence = 0;
+let lastLocationRecoveryRequestedAt = 0;
 
 export function getLatestLocations() {
   return Array.from(latestLocations.values());
@@ -61,6 +63,13 @@ function appendLocationHistory(location: TrackedLocation) {
     .concat({ ...location, sequence: ++locationHistorySequence })
     .slice(-LOCATION_HISTORY_MAX_POINTS);
   locationHistory.set(location.userId, nextPoints);
+}
+
+function requestLocationRecovery(io: Server) {
+  const now = Date.now();
+  if (now - lastLocationRecoveryRequestedAt < LOCATION_RECOVERY_REQUEST_INTERVAL_MS) return;
+  lastLocationRecoveryRequestedAt = now;
+  io.emit('request_location_update');
 }
 
 export function setupSocketHandler(io: Server) {
@@ -122,6 +131,7 @@ export function setupSocketHandler(io: Server) {
     
     // Auto-join common channel
     socket.emit('connected', { userId: user.userId });
+    socket.emit('request_location_update');
 
     socket.on('join_channel', (channelId: string) => {
       socket.join(channelId);
@@ -181,6 +191,9 @@ export function setupSocketHandler(io: Server) {
       socket.emit('location_snapshot', {
         locations: Array.from(latestLocations.values())
       });
+      if (latestLocations.size === 0) {
+        requestLocationRecovery(io);
+      }
     });
 
     socket.on('location_update', (payload) => {

@@ -184,6 +184,9 @@ class SignalingClient(
                         applyLocationJson(locations.getJSONObject(i))
                     }
                 }
+                on("request_location_update") {
+                    _events.tryEmit(SignalingEvent.LocationUpdateRequested)
+                }
                 on("channel_info") { args ->
                     val data = args[0] as JSONObject
                     val membersArray = data.getJSONArray("members")
@@ -370,6 +373,7 @@ sealed class SignalingEvent {
     object Connected : SignalingEvent()
     object Disconnected : SignalingEvent()
     object Reconnecting : SignalingEvent()
+    object LocationUpdateRequested : SignalingEvent()
     
     data class FloorGranted(val userId: String, val name: String, val role: UserRole) : SignalingEvent()
     data class FloorDenied(val reason: String, val currentHolder: String?) : SignalingEvent()

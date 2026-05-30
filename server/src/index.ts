@@ -136,9 +136,66 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       left: 12px;
       right: 12px;
       bottom: 12px;
-      max-height: 38vh;
-      overflow: auto;
       padding: 10px;
+    }
+    .trip-drawer {
+      max-height: min(64vh, 560px);
+      overflow: hidden;
+      transition: max-height .18s ease, padding .18s ease;
+    }
+    .trip-drawer.collapsed {
+      max-height: 82px;
+      padding-bottom: 8px;
+    }
+    .trip-drawer-handle {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: #ffffff;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      text-align: left;
+      cursor: pointer;
+      padding: 0;
+    }
+    .drawer-grip {
+      grid-column: 1 / -1;
+      width: 44px;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.36);
+      justify-self: center;
+      margin-bottom: 6px;
+    }
+    .drawer-title {
+      font-weight: 900;
+      line-height: 1.2;
+    }
+    .drawer-subtitle {
+      color: #c7ccd8;
+      font-size: 12px;
+      line-height: 1.35;
+      margin-top: 2px;
+    }
+    .drawer-action {
+      align-self: end;
+      border-radius: 999px;
+      background: rgba(29,155,240,.18);
+      color: #7dd3fc;
+      font-size: 12px;
+      font-weight: 900;
+      padding: 4px 8px;
+      white-space: nowrap;
+    }
+    .trip-drawer-content {
+      max-height: calc(min(64vh, 560px) - 72px);
+      overflow: auto;
+      margin-top: 10px;
+      padding-bottom: 2px;
+    }
+    .trip-drawer.collapsed .trip-drawer-content {
+      display: none;
     }
     .title { font-weight: 800; font-size: 16px; }
     .muted { color: #c7ccd8; font-size: 13px; }
@@ -304,7 +361,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
     @media (min-width: 720px) {
       .topbar { right: auto; width: 390px; }
-      .panel { right: auto; width: 390px; max-height: 48vh; }
+      .panel { right: auto; width: 390px; }
+      .trip-drawer { max-height: min(62vh, 620px); }
+      .trip-drawer-content { max-height: calc(min(62vh, 620px) - 72px); }
     }
   </style>
 </head>
@@ -317,9 +376,19 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     </div>
     <div class="status"><span class="dot" id="serverDot"></span><span id="serverText">Connecting</span></div>
   </div>
-  <div class="panel">
-    <div id="userList"></div>
-    <div id="timeline" class="timeline"></div>
+  <div id="tripDrawer" class="panel trip-drawer collapsed">
+    <button type="button" class="trip-drawer-handle" id="tripDrawerHandle" onclick="setTripDrawerExpanded(!tripDrawerExpanded)" aria-expanded="false">
+      <span class="drawer-grip"></span>
+      <span>
+        <span class="drawer-title" id="tripDrawerTitle">Trip Details</span>
+        <span class="drawer-subtitle" id="tripDrawerSubtitle">Tap karo to details khulse</span>
+      </span>
+      <span class="drawer-action" id="tripDrawerAction">Open</span>
+    </button>
+    <div id="tripDrawerContent" class="trip-drawer-content">
+      <div id="userList"></div>
+      <div id="timeline" class="timeline"></div>
+    </div>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
@@ -343,6 +412,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     let selectedTripIndex = -1;
     let selectedTripSignature = '';
     let selectedTimelineUserId = userId || '';
+    let tripDrawerExpanded = false;
     let firstFix = true;
 
     function escapeText(value) {
@@ -542,6 +612,27 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       stopMarkers.forEach((marker) => setLayerVisible(marker, visible));
     }
 
+    function setTripDrawerExpanded(expanded) {
+      tripDrawerExpanded = !!expanded;
+      const drawer = document.getElementById('tripDrawer');
+      const handle = document.getElementById('tripDrawerHandle');
+      const action = document.getElementById('tripDrawerAction');
+      const timeline = document.getElementById('timeline');
+      if (!drawer || !handle) return;
+      drawer.classList.toggle('collapsed', !tripDrawerExpanded);
+      drawer.classList.toggle('expanded', tripDrawerExpanded);
+      handle.setAttribute('aria-expanded', String(tripDrawerExpanded));
+      if (action) action.textContent = tripDrawerExpanded ? 'Close' : 'Open';
+      if (timeline) timeline.classList.toggle('drawer-open', tripDrawerExpanded);
+    }
+
+    function updateTripDrawerChrome(title, subtitle) {
+      const titleNode = document.getElementById('tripDrawerTitle');
+      const subtitleNode = document.getElementById('tripDrawerSubtitle');
+      if (titleNode) titleNode.textContent = title;
+      if (subtitleNode) subtitleNode.textContent = subtitle;
+    }
+
     function renderList(locations, historyCounts, historyPoints) {
       const list = document.getElementById('userList');
       if (!locations.length) {
@@ -577,6 +668,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         selectedTripIndex = -1;
         tripLayers.clearLayers();
         setLiveLayersVisible(true);
+        updateTripDrawerChrome('Trip Details', 'User par Track dabavo');
         timeline.innerHTML = '<div class="timeline-title">Trip Report</div><div class="muted">User par Track dabavo, pachi trip summary dekhase.</div>';
         return;
       }
@@ -591,6 +683,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         selectedTripIndex = -1;
         tripLayers.clearLayers();
         setLiveLayersVisible(true);
+        updateTripDrawerChrome('Trip Details', 'Report mate ochha points che');
         timeline.innerHTML = '<div class="timeline-title">Trip Report</div><div class="muted">Aa user ni trip report mate ochha points che. Phone move thase pachi report banse.</div>';
         return;
       }
@@ -607,17 +700,23 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         selectedTripIndex = -1;
         tripLayers.clearLayers();
         setLiveLayersVisible(true);
+        updateTripDrawerChrome('Trip Details - ' + selectedName, 'Factory thi bahar jashe tyare Trip 1 start thase');
         timeline.innerHTML = '<div class="timeline-title">Trip Report - ' + selectedName + '</div>' +
           '<div class="muted">Aa user haju factory zone mathi bahar nikalyo nathi. Factory thi bahar jashe tyare Trip 1 start thase.</div>';
         return;
       }
 
+      const summary = buildTripSummary(trips);
+      updateTripDrawerChrome(
+        'Aaj ni trips - ' + selectedName,
+        summary.totalTrips + ' trip, ' + formatDistance(summary.totalDistanceMeters) + ' - tap karo details mate'
+      );
       timeline.innerHTML =
         '<div class="trip-toolbar">' +
           '<div class="timeline-title">Aaj ni trips - ' + selectedName + '</div>' +
           '<button onclick="showLiveMap()">Live Map</button>' +
         '</div>' +
-        renderTripSummary(buildTripSummary(trips)) +
+        renderTripSummary(summary) +
         trips.map(renderTripCard).join('');
 
       if (selectedTripIndex >= 0) {
