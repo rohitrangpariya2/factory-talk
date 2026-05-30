@@ -7,6 +7,7 @@ import { joinChannel, leaveChannel, leaveAllChannels, getChannelMembers, getSock
 import { requestFloor, releaseFloor, getFloorState, checkFloorTimeouts } from './floorControl';
 import { sendBroadcastWakeUp } from '../services/fcmService';
 import { logTalkStart, logTalkEnd } from '../services/logService';
+import { persistLocationHistory } from '../services/locationHistoryService';
 import { buildAudioRelayEvent } from './audioRelay';
 
 let reminderSchedule: { onTime: string; offTime: string } | null = null;
@@ -212,6 +213,9 @@ export function setupSocketHandler(io: Server) {
       };
       latestLocations.set(user.userId, trackedLocation);
       appendLocationHistory(trackedLocation);
+      void persistLocationHistory(trackedLocation).catch((error) => {
+        console.error('Failed to persist location history:', error);
+      });
 
       io.emit('user_location_updated', trackedLocation);
     });

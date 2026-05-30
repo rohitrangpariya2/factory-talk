@@ -8,6 +8,7 @@ import './config/firebase'; // Initialize Firebase
 import authRoutes from './api/routes/auth';
 import userRoutes from './api/routes/users';
 import channelRoutes from './api/routes/channels';
+import { getSavedLocationHistory } from './services/locationHistoryService';
 import { getLatestLocations, getLocationHistory, setupSocketHandler } from './signaling/socketHandler';
 
 const app = express();
@@ -43,6 +44,23 @@ app.get('/locations', (req, res) => {
 app.get('/locations/history', (req, res) => {
   const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
   res.status(200).json({ history: getLocationHistory(userId) });
+});
+
+app.get('/locations/history/saved', async (req, res) => {
+  try {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : '';
+    const limit = Number(req.query.limit ?? 300);
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+
+    const history = await getSavedLocationHistory(userId, Number.isFinite(limit) ? limit : 300);
+    res.status(200).json({ history });
+  } catch (error) {
+    console.error('Failed to read saved location history:', error);
+    res.status(500).json({ error: 'Failed to read saved location history' });
+  }
 });
 
 app.get(['/map', '/map/:userId'], (req, res) => {
@@ -161,6 +179,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const markers = new Map();
     const circles = new Map();
     const historyLines = new Map();
+    let savedHistory = [];
     let firstFix = true;
 
     function escapeText(value) {
@@ -243,6 +262,21 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       });
     }
 
+    function mergeHistory(savedPoints, livePoints) {
+      const seen = new Set();
+      return savedPoints.concat(livePoints).filter((point) => {
+        const key = [
+          point.userId,
+          Math.round(Number(point.latitude) * 100000),
+          Math.round(Number(point.longitude) * 100000),
+          Number(point.locationUpdatedAt || 0)
+        ].join(':');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
     function updateMap(location) {
       const key = location.userId;
       const latLng = [location.latitude, location.longitude];
@@ -305,6 +339,17 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       marker.openPopup();
     };
 
+    async function loadSavedHistory() {
+      if (!userId) return;
+      try {
+        const response = await fetch('/locations/history/saved?userId=' + encodeURIComponent(userId) + '&limit=300', { cache: 'no-store' });
+        const data = await response.json();
+        savedHistory = Array.isArray(data.history) ? data.history : [];
+      } catch (error) {
+        savedHistory = [];
+      }
+    }
+
     async function refresh() {
       try {
         const response = await fetch('/locations', { cache: 'no-store' });
@@ -314,7 +359,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         const locations = (data.locations || [])
           .filter((item) => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)))
           .sort((a, b) => Number(b.locationUpdatedAt || 0) - Number(a.locationUpdatedAt || 0));
-        const historyPoints = historyData.history || [];
+        const historyPoints = mergeHistory(savedHistory, historyData.history || []);
         const historyCounts = new Map();
         historyPoints.forEach((point) => {
           historyCounts.set(point.userId, (historyCounts.get(point.userId) || 0) + 1);
@@ -342,7 +387,11 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }
     }
 
-    refresh();
+    if (userId) {
+      loadSavedHistory().finally(refresh);
+    } else {
+      refresh();
+    }
     setInterval(refresh, 2000);
   </script>
 </body>
