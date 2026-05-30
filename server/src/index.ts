@@ -8,6 +8,7 @@ import './config/firebase'; // Initialize Firebase
 import authRoutes from './api/routes/auth';
 import userRoutes from './api/routes/users';
 import channelRoutes from './api/routes/channels';
+import { buildFactoryZoneScript } from './map/factoryZone';
 import { getSavedLocationHistory } from './services/locationHistoryService';
 import { getLatestLocations, getLocationHistory, setupSocketHandler } from './signaling/socketHandler';
 
@@ -245,6 +246,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap'
     }).addTo(map);
+    ${buildFactoryZoneScript()}
     const markers = new Map();
     const circles = new Map();
     const historyLines = new Map();
