@@ -134,6 +134,36 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       cursor: pointer;
       white-space: nowrap;
     }
+    .timeline {
+      margin-top: 12px;
+      border-top: 1px solid rgba(255,255,255,.12);
+      padding-top: 10px;
+    }
+    .timeline-title {
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .timeline-item {
+      padding: 9px 10px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.045);
+      margin-top: 8px;
+    }
+    .timeline-time {
+      font-weight: 800;
+      color: #f8fafc;
+    }
+    .timeline-meta {
+      color: #c7ccd8;
+      font-size: 12px;
+      line-height: 1.45;
+      margin-top: 3px;
+    }
+    .timeline-link {
+      color: #38bdf8;
+      text-decoration: none;
+      font-weight: 700;
+    }
     .marker-pin {
       width: 18px;
       height: 18px;
@@ -167,6 +197,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
   </div>
   <div class="panel">
     <div id="userList"></div>
+    <div id="timeline" class="timeline"></div>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
@@ -180,6 +211,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const circles = new Map();
     const historyLines = new Map();
     let savedHistory = [];
+    let selectedTimelineUserId = userId || '';
     let firstFix = true;
 
     function escapeText(value) {
@@ -203,6 +235,45 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       if (seconds < 5) return 'just now';
       if (seconds < 60) return seconds + ' sec ago';
       return Math.floor(seconds / 60) + ' min ago';
+    }
+
+    function formatClock(timestamp) {
+      if (!timestamp) return 'Unknown time';
+      return new Date(Number(timestamp)).toLocaleString(undefined, {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    }
+
+    function formatDuration(ms) {
+      const seconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+      if (seconds < 60) return seconds + ' sec';
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      if (minutes < 60) return minutes + ' min ' + remainingSeconds + ' sec';
+      const hours = Math.floor(minutes / 60);
+      const remainingMinutes = minutes % 60;
+      return hours + ' hr ' + remainingMinutes + ' min';
+    }
+
+    function distanceMeters(a, b) {
+      const earthRadiusMeters = 6371000;
+      const dLat = (Number(b.latitude) - Number(a.latitude)) * Math.PI / 180;
+      const dLon = (Number(b.longitude) - Number(a.longitude)) * Math.PI / 180;
+      const lat1 = Number(a.latitude) * Math.PI / 180;
+      const lat2 = Number(b.latitude) * Math.PI / 180;
+      const sinLat = Math.sin(dLat / 2);
+      const sinLon = Math.sin(dLon / 2);
+      const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
+      return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+
+    function formatDistance(meters) {
+      if (meters < 1000) return Math.round(meters) + ' m';
+      return (meters / 1000).toFixed(2) + ' km';
     }
 
     function makeIcon(color) {
@@ -307,10 +378,11 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }
     }
 
-    function renderList(locations, historyCounts) {
+    function renderList(locations, historyCounts, historyPoints) {
       const list = document.getElementById('userList');
       if (!locations.length) {
         list.innerHTML = '<div class="muted">Koi phone nu location haju receive nathi thayu.</div>';
+        renderTimeline(historyPoints || []);
         return;
       }
       list.innerHTML = locations.map((location) => {
@@ -330,13 +402,62 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           '</div>' +
         '</div>';
       }).join('');
+      renderTimeline(historyPoints || []);
+    }
+
+    function renderTimeline(points) {
+      const timeline = document.getElementById('timeline');
+      if (!selectedTimelineUserId) {
+        timeline.innerHTML = '<div class="timeline-title">History Timeline</div><div class="muted">Track dabavo pachi user ni point-wise history dekhase.</div>';
+        return;
+      }
+
+      const userPoints = points
+        .filter((point) => point.userId === selectedTimelineUserId)
+        .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
+        .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+
+      if (!userPoints.length) {
+        timeline.innerHTML = '<div class="timeline-title">History Timeline</div><div class="muted">Aa user ni saved history haju nathi.</div>';
+        return;
+      }
+
+      const selectedName = escapeText(userPoints[userPoints.length - 1].name || 'Factory Phone');
+      const latestPoints = userPoints.slice(-25).reverse();
+      const rows = latestPoints.map((point) => {
+        const chronologicalIndex = userPoints.indexOf(point);
+        const nextPoint = userPoints[chronologicalIndex + 1];
+        const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + point.latitude + ',' + point.longitude;
+        const latLng = Number(point.latitude).toFixed(5) + ', ' + Number(point.longitude).toFixed(5);
+        const accuracy = point.accuracy ? Math.round(Number(point.accuracy)) + 'm accuracy' : 'accuracy unknown';
+        let movement = 'Latest point';
+        if (nextPoint) {
+          const gap = Number(nextPoint.locationUpdatedAt || 0) - Number(point.locationUpdatedAt || 0);
+          const distance = distanceMeters(point, nextPoint);
+          movement = distance < 50
+            ? 'Hold: ' + formatDuration(gap) + ' in same area'
+            : 'Next point: ' + formatDuration(gap) + ', ' + formatDistance(distance);
+        }
+
+        return '<div class="timeline-item">' +
+          '<div class="timeline-time">' + escapeText(formatClock(point.locationUpdatedAt)) + '</div>' +
+          '<div class="timeline-meta">Where: ' + escapeText(latLng) + ' - ' + escapeText(accuracy) + '</div>' +
+          '<div class="timeline-meta">' + escapeText(movement) + '</div>' +
+          '<div class="timeline-meta"><a class="timeline-link" target="_blank" rel="noopener" href="' + mapsUrl + '">Open this point</a></div>' +
+        '</div>';
+      }).join('');
+
+      timeline.innerHTML = '<div class="timeline-title">History Timeline - ' + selectedName + '</div>' + rows;
     }
 
     window.focusUser = function(id) {
+      selectedTimelineUserId = id;
       const marker = markers.get(id);
-      if (!marker) return;
-      map.setView(marker.getLatLng(), 17, { animate: true });
-      marker.openPopup();
+      if (marker) {
+        map.setView(marker.getLatLng(), 17, { animate: true });
+        marker.openPopup();
+      }
+      refresh();
     };
 
     async function loadSavedHistory() {
@@ -369,12 +490,12 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         document.getElementById('summary').textContent =
           locations.length + ' live, ' + historyPoints.length + ' history points';
         if (!locations.length) {
-          renderList([], historyCounts);
+          renderList([], historyCounts, historyPoints);
           return;
         }
         updateHistory(historyPoints);
         locations.forEach(updateMap);
-        renderList(locations, historyCounts);
+        renderList(locations, historyCounts, historyPoints);
         if (firstFix) {
           const selected = locations.find((item) => item.userId === userId) || locations[0];
           map.setView([selected.latitude, selected.longitude], 17);
