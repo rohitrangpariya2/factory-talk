@@ -620,10 +620,22 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         const historyResponse = await fetch('/locations/history' + (userId ? '?userId=' + encodeURIComponent(userId) : ''), { cache: 'no-store' });
         const data = await response.json();
         const historyData = await historyResponse.json();
-        const locations = (data.locations || [])
+        const liveLocations = (data.locations || [])
           .filter((item) => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)))
           .sort((a, b) => Number(b.locationUpdatedAt || 0) - Number(a.locationUpdatedAt || 0));
         const historyPoints = mergeHistory(savedHistory, historyData.history || []);
+        const locations = userId
+          ? liveLocations.filter((item) => item.userId === userId)
+          : liveLocations;
+        if (userId && !locations.length) {
+          const savedPointsForUser = historyPoints
+            .filter((point) => point.userId === userId)
+            .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+          const lastSavedPoint = savedPointsForUser[savedPointsForUser.length - 1];
+          if (lastSavedPoint) {
+            locations.push(lastSavedPoint);
+          }
+        }
         const historyCounts = new Map();
         historyPoints.forEach((point) => {
           historyCounts.set(point.userId, (historyCounts.get(point.userId) || 0) + 1);
@@ -632,11 +644,11 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         document.getElementById('serverText').textContent = 'Online';
         document.getElementById('summary').textContent =
           locations.length + ' live, ' + historyPoints.length + ' history points';
+        updateHistory(historyPoints);
         if (!locations.length) {
           renderList([], historyCounts, historyPoints);
           return;
         }
-        updateHistory(historyPoints);
         locations.forEach(updateMap);
         renderList(locations, historyCounts, historyPoints);
         if (firstFix) {
