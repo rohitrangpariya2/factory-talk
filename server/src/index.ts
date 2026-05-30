@@ -164,6 +164,60 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       cursor: pointer;
       white-space: nowrap;
     }
+    .trip-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 10px 0 8px;
+    }
+    .trip-toolbar button {
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 12px;
+      color: #ffffff;
+      background: #1d9bf0;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .trip-card {
+      width: 100%;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 8px;
+      background: rgba(255,255,255,.045);
+      color: #ffffff;
+      text-align: left;
+      padding: 10px;
+      margin-top: 8px;
+      cursor: pointer;
+    }
+    .trip-card.active {
+      border-color: #38bdf8;
+      background: rgba(29,155,240,.16);
+    }
+    .trip-card-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 900;
+    }
+    .trip-card-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .trip-pill {
+      border-radius: 999px;
+      background: rgba(29,155,240,.18);
+      color: #7dd3fc;
+      font-size: 12px;
+      font-weight: 900;
+      padding: 4px 8px;
+      white-space: nowrap;
+    }
     .timeline {
       margin-top: 12px;
       border-top: 1px solid rgba(255,255,255,.12);
@@ -281,7 +335,12 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const markers = new Map();
     const circles = new Map();
     const historyLines = new Map();
+    const tripLayers = L.layerGroup().addTo(map);
     let savedHistory = [];
+    let lastHistoryPoints = [];
+    let currentTrips = [];
+    let selectedTripIndex = -1;
+    let selectedTripSignature = '';
     let selectedTimelineUserId = userId || '';
     let firstFix = true;
 
@@ -462,6 +521,22 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }
     }
 
+    function setLayerVisible(layer, visible) {
+      if (!layer) return;
+      if (visible) {
+        if (!map.hasLayer(layer)) layer.addTo(map);
+      } else if (map.hasLayer(layer)) {
+        map.removeLayer(layer);
+      }
+    }
+
+    function setLiveLayersVisible(visible) {
+      markers.forEach((marker) => setLayerVisible(marker, visible));
+      circles.forEach((circle) => setLayerVisible(circle, visible));
+      historyLines.forEach((line) => setLayerVisible(line, visible));
+      stopMarkers.forEach((marker) => setLayerVisible(marker, visible));
+    }
+
     function renderList(locations, historyCounts, historyPoints) {
       const list = document.getElementById('userList');
       if (!locations.length) {
@@ -490,8 +565,13 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
 
     function renderTripReport(points) {
+      lastHistoryPoints = points || [];
       const timeline = document.getElementById('timeline');
       if (!selectedTimelineUserId) {
+        currentTrips = [];
+        selectedTripIndex = -1;
+        tripLayers.clearLayers();
+        setLiveLayersVisible(true);
         timeline.innerHTML = '<div class="timeline-title">Trip Report</div><div class="muted">User par Track dabavo, pachi trip summary dekhase.</div>';
         return;
       }
@@ -502,22 +582,46 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0)));
 
       if (userPoints.length < 2) {
+        currentTrips = [];
+        selectedTripIndex = -1;
+        tripLayers.clearLayers();
+        setLiveLayersVisible(true);
         timeline.innerHTML = '<div class="timeline-title">Trip Report</div><div class="muted">Aa user ni trip report mate ochha points che. Phone move thase pachi report banse.</div>';
         return;
       }
 
       const selectedName = escapeText(userPoints[userPoints.length - 1].name || 'Factory Phone');
       const trips = splitFactoryTrips(userPoints);
+      currentTrips = trips;
+      if (selectedTripIndex >= trips.length) {
+        selectedTripIndex = -1;
+        selectedTripSignature = '';
+        tripLayers.clearLayers();
+      }
       if (!trips.length) {
+        selectedTripIndex = -1;
+        tripLayers.clearLayers();
+        setLiveLayersVisible(true);
         timeline.innerHTML = '<div class="timeline-title">Trip Report - ' + selectedName + '</div>' +
           '<div class="muted">Aa user haju factory zone mathi bahar nikalyo nathi. Factory thi bahar jashe tyare Trip 1 start thase.</div>';
         return;
       }
 
       timeline.innerHTML =
-        '<div class="timeline-title">Trip Report - ' + selectedName + '</div>' +
+        '<div class="trip-toolbar">' +
+          '<div class="timeline-title">Aaj ni trips - ' + selectedName + '</div>' +
+          '<button onclick="showLiveMap()">Live Map</button>' +
+        '</div>' +
         renderTripSummary(buildTripSummary(trips)) +
         trips.map(renderTripCard).join('');
+
+      if (selectedTripIndex >= 0) {
+        drawTripOnMap(trips[selectedTripIndex], selectedTripIndex);
+      } else {
+        selectedTripSignature = '';
+        tripLayers.clearLayers();
+        setLiveLayersVisible(true);
+      }
     }
 
     function buildTripSummary(trips) {
@@ -550,66 +654,22 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
     function renderTripCard(trip, index) {
       const report = buildTripReport(trip.points);
-      const expectedSlowMs = report.distanceMeters / 20 * 3600000 / 1000;
-      const expectedFastMs = report.distanceMeters / 30 * 3600000 / 1000;
-      const expectedText = formatDuration(expectedFastMs) + ' - ' + formatDuration(expectedSlowMs);
-      const directText = report.stops.length
-        ? 'Vachhe ' + report.stops.length + ' stop'
-        : 'Direct gayo, major stop nathi';
       const title = trip.isComplete ? 'Trip ' + (index + 1) : 'Active Trip';
       const statusText = trip.isComplete ? 'Factory par pacho avyo' : 'Haju factory bahar che';
-      const endLabel = trip.isComplete ? 'Factory pacho avyo' : 'Last point';
+      const activeClass = selectedTripIndex === index ? ' active' : '';
 
-      const stopRows = report.stops.length
-        ? report.stops.map((stop, index) => {
-            const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + stop.latitude + ',' + stop.longitude;
-            return '<div class="timeline-item">' +
-              '<div class="timeline-time">Stop ' + (index + 1) + ' - ' + escapeText(formatClock(stop.startTime)) + '</div>' +
-              '<div class="timeline-chip">Stopped</div>' +
-              '<div class="timeline-main">Aa jagya par ' + escapeText(formatDuration(stop.durationMs)) + ' ubho ryo.</div>' +
-              '<div class="timeline-meta">Location: ' + Number(stop.latitude).toFixed(5) + ', ' + Number(stop.longitude).toFixed(5) + '</div>' +
-              '<div class="timeline-meta"><a class="timeline-link" target="_blank" rel="noopener" href="' + mapsUrl + '">Stop Google Map ma kholo</a></div>' +
-            '</div>';
-          }).join('')
-        : '<div class="timeline-item"><div class="timeline-main">Vachhe koi major stop detect nathi thayu.</div><div class="timeline-meta">1 min thi vadhu same area ma rokay to stop count thase.</div></div>';
-
-      return '<div class="timeline-item">' +
-        '<div class="timeline-time">' + title + ' - ' + statusText + '</div>' +
-        '<div class="timeline-main">' + escapeText(directText) + '</div>' +
-        '<div class="report-grid">' +
-          reportBox('Factory thi niklyo', formatClock(report.startTime)) +
-          reportBox(endLabel, formatClock(report.endTime)) +
-          reportBox('Actual time', formatDuration(report.totalTimeMs)) +
-          reportBox('Expected bike time', expectedText) +
-          reportBox('Trip km', formatDistance(report.distanceMeters)) +
-          reportBox('Moving time', formatDuration(report.movingTimeMs)) +
+      return '<button type="button" class="trip-card' + activeClass + '" onclick="openTripOnMap(' + index + ')">' +
+        '<div class="trip-card-title">' +
+          '<span>' + title + '</span>' +
+          '<span class="trip-pill">Map ma kholo</span>' +
         '</div>' +
-        renderTripRoutePoints(trip) +
-        '<div class="timeline-title">Stops</div>' +
-        stopRows +
-      '</div>';
-    }
-
-    function renderTripRoutePoints(trip) {
-      const routePoints = trip.points.filter((point, index, points) => {
-        if (index === 0 || index === points.length - 1) return true;
-        if (isInsideFactoryZone(point)) return false;
-        const previous = points[index - 1];
-        return distanceMeters(previous, point) >= 250;
-      }).slice(0, 8);
-
-      return '<div class="timeline-title">Route points</div>' +
-        routePoints.map((point, index) => {
-          const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + point.latitude + ',' + point.longitude;
-          const pointLabel = index === 0
-            ? 'Factory start'
-            : (index === routePoints.length - 1 && trip.isComplete ? 'Factory return' : 'Point ' + index);
-          return '<div class="timeline-meta">' +
-            '<a class="timeline-link" target="_blank" rel="noopener" href="' + mapsUrl + '">' + escapeText(pointLabel) + '</a>' +
-            ' - ' + escapeText(formatClock(point.locationUpdatedAt)) +
-            ' - ' + Number(point.latitude).toFixed(5) + ', ' + Number(point.longitude).toFixed(5) +
-          '</div>';
-        }).join('');
+        '<div class="timeline-meta">' + escapeText(statusText) + ' - ' + escapeText(formatClock(report.startTime)) + '</div>' +
+        '<div class="trip-card-meta">' +
+          reportBox('Trip km', formatDistance(report.distanceMeters)) +
+          reportBox('Time', formatDuration(report.totalTimeMs)) +
+          reportBox('Stops', String(report.stops.length)) +
+        '</div>' +
+      '</button>';
     }
 
     function reportBox(label, value) {
@@ -744,8 +804,110 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       };
     }
 
+    function tripSignature(trip, index) {
+      const first = trip.points[0];
+      const last = trip.points[trip.points.length - 1];
+      return [
+        index,
+        trip.points.length,
+        Number(first.locationUpdatedAt || 0),
+        Number(last.locationUpdatedAt || 0),
+        trip.isComplete ? 'done' : 'active'
+      ].join(':');
+    }
+
+    function addTripPoint(latLng, color, title, body) {
+      L.circleMarker(latLng, {
+        radius: 8,
+        color: '#ffffff',
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 1
+      }).addTo(tripLayers).bindPopup('<strong>' + escapeText(title) + '</strong><br>' + escapeText(body));
+    }
+
+    function drawTripOnMap(trip, index) {
+      if (!trip || !trip.points.length) return;
+      const signature = tripSignature(trip, index);
+      setLiveLayersVisible(false);
+      if (selectedTripSignature === signature) return;
+      selectedTripSignature = signature;
+      tripLayers.clearLayers();
+
+      const latLngs = trip.points
+        .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
+        .map((point) => [point.latitude, point.longitude]);
+      if (!latLngs.length) return;
+
+      const title = trip.isComplete ? 'Trip ' + (index + 1) : 'Active Trip';
+      const report = buildTripReport(trip.points);
+      const routeLine = L.polyline(latLngs, {
+        color: '#1d9bf0',
+        weight: 6,
+        opacity: 0.9,
+        lineCap: 'round',
+        lineJoin: 'round'
+      }).addTo(tripLayers).bindPopup(title + '<br>' + formatDistance(report.distanceMeters));
+
+      const roadPoints = sampleRoadTrailPoints(trip.points);
+      if (roadPoints.length > 1) {
+        fetchRoadLatLngs(roadPoints)
+          .then((roadLatLngs) => {
+            if (selectedTripSignature === signature && roadLatLngs.length > 1) {
+              routeLine.setLatLngs(roadLatLngs);
+            }
+          })
+          .catch(() => {});
+      }
+
+      const first = trip.points[0];
+      const last = trip.points[trip.points.length - 1];
+      addTripPoint([first.latitude, first.longitude], '#22c55e', 'Factory start', formatClock(first.locationUpdatedAt));
+      report.stops.forEach((stop, stopIndex) => {
+        addTripPoint(
+          [stop.latitude, stop.longitude],
+          '#ef4444',
+          'Stop ' + (stopIndex + 1),
+          formatDuration(stop.durationMs) + ' ubho ryo'
+        );
+      });
+      addTripPoint(
+        [last.latitude, last.longitude],
+        trip.isComplete ? '#0ea5e9' : '#f59e0b',
+        trip.isComplete ? 'Factory return' : 'Last point',
+        formatClock(last.locationUpdatedAt)
+      );
+
+      const bounds = L.latLngBounds(latLngs);
+      report.stops.forEach((stop) => bounds.extend([stop.latitude, stop.longitude]));
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [46, 46], maxZoom: 17 });
+      }
+    }
+
+    function openTripOnMap(index) {
+      selectedTripIndex = index;
+      selectedTripSignature = '';
+      renderTripReport(lastHistoryPoints);
+    }
+
+    function showLiveMap() {
+      selectedTripIndex = -1;
+      selectedTripSignature = '';
+      tripLayers.clearLayers();
+      setLiveLayersVisible(true);
+      renderTripReport(lastHistoryPoints);
+    }
+
+    window.openTripOnMap = openTripOnMap;
+    window.showLiveMap = showLiveMap;
+
     window.focusUser = function(id) {
       selectedTimelineUserId = id;
+      selectedTripIndex = -1;
+      selectedTripSignature = '';
+      tripLayers.clearLayers();
+      setLiveLayersVisible(true);
       const marker = markers.get(id);
       if (marker) {
         map.setView(marker.getLatLng(), 17, { animate: true });

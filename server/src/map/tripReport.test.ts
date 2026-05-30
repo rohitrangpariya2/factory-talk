@@ -18,11 +18,14 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain("reportBox('Active trips'");
   });
 
-  test('each trip card includes route and stop details with distance', () => {
-    expect(indexSource).toContain('function renderTripRoutePoints(trip)');
-    expect(indexSource).toContain('Route points');
+  test('renders simple trip cards that can open each trip on the map', () => {
+    expect(indexSource).toContain('function openTripOnMap(index)');
+    expect(indexSource).toContain('function drawTripOnMap(trip, index)');
+    expect(indexSource).toContain('function showLiveMap()');
+    expect(indexSource).toContain('Aaj ni trips');
+    expect(indexSource).toContain('Map ma kholo');
     expect(indexSource).toContain("reportBox('Trip km'");
-    expect(indexSource).toContain('Stops');
+    expect(indexSource).toContain("reportBox('Stops'");
   });
 
   test('does not show avg or max speed in the trip report', () => {
