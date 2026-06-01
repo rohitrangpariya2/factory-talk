@@ -826,7 +826,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       if (selectedTripIndex < 0 && !forceLiveMapMode) {
         // Select active trip if exists, otherwise latest completed trip
         const activeIndex = trips.findIndex((trip) => !trip.isComplete);
+        console.log('[FactoryTalk Debug] selectedTripIndex was negative, activeIndex:', activeIndex, 'trips count:', trips.length);
         selectedTripIndex = activeIndex >= 0 ? activeIndex : trips.length - 1;
+        console.log('[FactoryTalk Debug] auto-selected trip index:', selectedTripIndex);
         selectedTripSignature = '';
         shouldAutoFitTripBounds = true;
       }
