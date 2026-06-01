@@ -94,7 +94,11 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('const LIVE_TRAIL_MAX_POINTS = 25');
     expect(indexSource).toContain('const LIVE_TRAIL_MAX_AGE_MS = 10 * 60 * 1000');
     expect(indexSource).toContain("const LIVE_TRAIL_COLOR = '#2563eb'");
+    expect(indexSource).toContain('function filterStablePoints(points)');
+    expect(indexSource).toContain('MAX_GPS_JUMP_SPEED_KMH = 110');
+    expect(indexSource).toContain('MAX_GPS_JUMP_METERS = 450');
     expect(indexSource).toContain('function liveTrailPoints(points)');
+    expect(indexSource).toContain('const stablePoints = filterStablePoints(points)');
     expect(indexSource).toContain('const trailPoints = liveTrailPoints(userPoints)');
     expect(indexSource).toContain("dashArray: '2 8'");
     expect(indexSource).not.toContain('applyRoadTrail(key, trailPoints');

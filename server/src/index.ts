@@ -486,6 +486,37 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return (meters / 1000).toFixed(2) + ' km';
     }
 
+    const MAX_GPS_JUMP_SPEED_KMH = 110;
+    const MAX_GPS_JUMP_METERS = 450;
+    const MIN_GPS_JUMP_INTERVAL_MS = 4000;
+    const MAX_FILTERED_ACCURACY_METERS = 120;
+
+    function filterStablePoints(points) {
+      const sorted = points
+        .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
+        .slice()
+        .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+      if (sorted.length < 2) return sorted;
+
+      const stable = [sorted[0]];
+      for (let index = 1; index < sorted.length; index += 1) {
+        const next = sorted[index];
+        const prev = stable[stable.length - 1];
+        const accuracy = Number(next.accuracy || 0);
+        if (accuracy > MAX_FILTERED_ACCURACY_METERS) continue;
+
+        const deltaMs = Number(next.locationUpdatedAt || 0) - Number(prev.locationUpdatedAt || 0);
+        if (deltaMs <= 0) continue;
+        const distance = distanceMeters(prev, next);
+        const speedKmh = (distance / 1000) / (deltaMs / 3600000);
+        const hardJump = deltaMs <= MIN_GPS_JUMP_INTERVAL_MS && distance >= MAX_GPS_JUMP_METERS;
+        if (hardJump || speedKmh > MAX_GPS_JUMP_SPEED_KMH) continue;
+        stable.push(next);
+      }
+
+      return stable.length >= 2 ? stable : sorted.slice(-2);
+    }
+
     function speedKmh(distanceMetersValue, durationMs) {
       const hours = Number(durationMs || 0) / 3600000;
       if (hours <= 0) return 0;
@@ -518,11 +549,12 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
 
     function liveTrailPoints(points) {
-      if (points.length < 2) return points;
-      const last = points[points.length - 1];
+      const stablePoints = filterStablePoints(points);
+      if (stablePoints.length < 2) return stablePoints;
+      const last = stablePoints[stablePoints.length - 1];
       const cutoff = Number(last.locationUpdatedAt || 0) - LIVE_TRAIL_MAX_AGE_MS;
-      const recent = points.filter((point) => Number(point.locationUpdatedAt || 0) >= cutoff);
-      const trail = recent.length >= 2 ? recent : points;
+      const recent = stablePoints.filter((point) => Number(point.locationUpdatedAt || 0) >= cutoff);
+      const trail = recent.length >= 2 ? recent : stablePoints;
       return trail.slice(-LIVE_TRAIL_MAX_POINTS);
     }
 
@@ -807,8 +839,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
 
     function simplifyPoints(points) {
+      const stablePoints = filterStablePoints(points);
       const simplified = [];
-      points.forEach((point) => {
+      stablePoints.forEach((point) => {
         const last = simplified[simplified.length - 1];
         if (!last || Math.abs(Number(point.locationUpdatedAt || 0) - Number(last.locationUpdatedAt || 0)) >= 15000 || distanceMeters(last, point) >= 25) {
           simplified.push(point);
