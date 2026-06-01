@@ -1,4 +1,4 @@
-const OSRM_ROUTE_BASE_URL = 'http://router.project-osrm.org/match/v1/driving/';
+const OSRM_ROUTE_BASE_URL = 'https://router.project-osrm.org/route/v1/driving/';
 const MAX_ROAD_ROUTE_POINTS = 60;
 
 export function normalizeRoadRouteCoordinates(input: string): string | null {
@@ -29,5 +29,5 @@ export function normalizeRoadRouteCoordinates(input: string): string | null {
 }
 
 export function buildOsrmRouteUrl(coordinates: string): string {
-  return `${OSRM_ROUTE_BASE_URL}${coordinates}?overview=full&geometries=geojson&steps=false&tidy=true&gaps=ignore&annotations=false`;
+  return `${OSRM_ROUTE_BASE_URL}${coordinates}?overview=full&geometries=geojson&steps=false&annotations=false`;
 }

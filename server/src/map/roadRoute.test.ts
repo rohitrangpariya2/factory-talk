@@ -17,11 +17,11 @@ describe('road route proxy helpers', () => {
     expect(normalizeRoadRouteCoordinates(tooMany)).toBeNull();
   });
 
-  test('builds a fixed OSRM map-matching URL', () => {
+  test('builds a fixed OSRM route URL over HTTPS', () => {
     const url = buildOsrmRouteUrl('72.938619,21.259844;72.875577,21.218610');
 
     expect(url).toBe(
-      'http://router.project-osrm.org/match/v1/driving/72.938619,21.259844;72.875577,21.218610?overview=full&geometries=geojson&steps=false&tidy=true&gaps=ignore&annotations=false'
+      'https://router.project-osrm.org/route/v1/driving/72.938619,21.259844;72.875577,21.218610?overview=full&geometries=geojson&steps=false&annotations=false'
     );
   });
 });

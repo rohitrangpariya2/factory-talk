@@ -50,15 +50,15 @@ export function buildRoadTrailScript(): string {
 
     async function fetchRoadLatLngs(points) {
       const response = await fetch(buildRoadRouteUrl(points), { cache: 'no-store' });
-      if (!response.ok) throw new Error('Road route failed');
+      if (!response.ok) throw new Error('Road route failed (' + response.status + ')');
       const data = await response.json();
       let coordinates = [];
-      if (data && data.code === 'Ok' && data.matchings && data.matchings.length) {
+      if (data && data.code === 'Ok' && data.routes && data.routes[0] && data.routes[0].geometry) {
+        coordinates = data.routes[0].geometry.coordinates;
+      } else if (data && data.code === 'Ok' && data.matchings && data.matchings.length) {
         coordinates = data.matchings
           .map((matching) => matching && matching.geometry && matching.geometry.coordinates ? matching.geometry.coordinates : [])
           .flat();
-      } else if (data && data.code === 'Ok' && data.routes && data.routes[0] && data.routes[0].geometry) {
-        coordinates = data.routes[0].geometry.coordinates;
       }
       if (!Array.isArray(coordinates) || coordinates.length < 2) throw new Error('Road route empty');
       return coordinates

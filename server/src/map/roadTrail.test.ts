@@ -12,6 +12,8 @@ describe('road trail script', () => {
     expect(script).toContain("Routes: OSRM");
     expect(script).toContain('function sampleRoadTrailPoints(points)');
     expect(script).toContain('async function fetchRoadLatLngs(points)');
+    expect(script).toContain("throw new Error('Road route failed (' + response.status + ')')");
+    expect(script).toContain('data.routes && data.routes[0] && data.routes[0].geometry');
     expect(script).toContain('data.matchings && data.matchings.length');
     expect(script).not.toContain('function applyRoadTrail');
     expect(script).not.toContain('roadTrailState');

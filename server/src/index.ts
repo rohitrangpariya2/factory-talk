@@ -365,7 +365,12 @@ app.get('/delivery/:userId', (req, res) => {
     }
 
     function updateRoute(points) {
-      const routePoints = activeRoutePoints(points);
+      let routePoints = activeRoutePoints(points);
+      if (routePoints.length < 2) {
+        routePoints = points
+          .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
+          .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+      }
       routeLayer.clearLayers();
       if (routePoints.length < 2) return;
       const signature = routePoints
@@ -434,7 +439,14 @@ app.get('/delivery/:userId', (req, res) => {
     function renderMarker(location) {
       const latLng = [location.latitude, location.longitude];
       markerLayer.clearLayers();
-      marker = L.marker(latLng).addTo(markerLayer);
+      const bikeIcon = L.divIcon({
+        className: '',
+        html: '<div style="width:36px;height:36px;background:#0ea5e9;border:3px solid #ffffff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);font-size:18px;">🛵</div>',
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
+        popupAnchor: [0, -20]
+      });
+      marker = L.marker(latLng, { icon: bikeIcon }).addTo(markerLayer);
       if (location.accuracy && Number(location.accuracy) > 0 && Number(location.accuracy) < 5000) {
         accuracyCircle = L.circle(latLng, {
           radius: Number(location.accuracy),

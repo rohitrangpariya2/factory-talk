@@ -27,6 +27,10 @@ describe('delivery tracking page route', () => {
     expect(indexSource).toContain("id=\"centerBtn\"");
     expect(indexSource).toContain('function updateRoute(points)');
     expect(indexSource).toContain('fetchRoadLatLngs(roadPoints)');
+    expect(indexSource).toContain('let routePoints = activeRoutePoints(points)');
+    expect(indexSource).toContain('if (routePoints.length < 2) {');
+    expect(indexSource).toContain("html: '<div style=\"width:36px;height:36px;background:#0ea5e9;");
+    expect(indexSource).toContain('marker = L.marker(latLng, { icon: bikeIcon }).addTo(markerLayer)');
   });
 
   test('falls back to latest history point when live location is unavailable', () => {

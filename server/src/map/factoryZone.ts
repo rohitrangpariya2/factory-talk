@@ -9,7 +9,7 @@ export const FACTORY_ZONE: FactoryZone = {
   name: 'Factory Zone',
   latitude: 21.259843683720433,
   longitude: 72.9386185449755,
-  radiusMeters: 20
+  radiusMeters: 200
 };
 
 export function buildFactoryZoneScript(zone: FactoryZone = FACTORY_ZONE): string {
