@@ -8,8 +8,8 @@ describe('road route proxy helpers', () => {
   });
 
   test('rejects invalid or too-large coordinate lists', () => {
-    const maxAllowed = Array.from({ length: 35 }, (_, index) => `72.${index},21.${index}`).join(';');
-    const tooMany = Array.from({ length: 36 }, (_, index) => `72.${index},21.${index}`).join(';');
+    const maxAllowed = Array.from({ length: 60 }, (_, index) => `72.${index},21.${index}`).join(';');
+    const tooMany = Array.from({ length: 61 }, (_, index) => `72.${index},21.${index}`).join(';');
 
     expect(normalizeRoadRouteCoordinates('72.1,21.1')).toBeNull();
     expect(normalizeRoadRouteCoordinates('bad')).toBeNull();
@@ -17,11 +17,11 @@ describe('road route proxy helpers', () => {
     expect(normalizeRoadRouteCoordinates(tooMany)).toBeNull();
   });
 
-  test('builds a fixed OSRM driving route URL', () => {
+  test('builds a fixed OSRM map-matching URL', () => {
     const url = buildOsrmRouteUrl('72.938619,21.259844;72.875577,21.218610');
 
     expect(url).toBe(
-      'http://router.project-osrm.org/route/v1/driving/72.938619,21.259844;72.875577,21.218610?overview=full&geometries=geojson&steps=false&annotations=false'
+      'http://router.project-osrm.org/match/v1/driving/72.938619,21.259844;72.875577,21.218610?overview=full&geometries=geojson&steps=false&tidy=true&gaps=ignore&annotations=false'
     );
   });
 });

@@ -1,9 +1,9 @@
 export function buildRoadTrailScript(): string {
   return `
     const ROAD_ROUTE_BASE_URL = '/road-route?coordinates=';
-    const ROAD_ROUTE_MAX_POINTS = 35;
-    const ROAD_ROUTE_MIN_DISTANCE_METERS = 50;
-    const ROAD_ROUTE_MIN_TIME_MS = 90000;
+    const ROAD_ROUTE_MAX_POINTS = 60;
+    const ROAD_ROUTE_MIN_DISTANCE_METERS = 20;
+    const ROAD_ROUTE_MIN_TIME_MS = 20000;
     const ROAD_ROUTE_MAX_ACCURACY_METERS = 150;
     map.attributionControl.addAttribution('Routes: OSRM');
 
@@ -52,9 +52,14 @@ export function buildRoadTrailScript(): string {
       const response = await fetch(buildRoadRouteUrl(points), { cache: 'no-store' });
       if (!response.ok) throw new Error('Road route failed');
       const data = await response.json();
-      const coordinates = data && data.code === 'Ok' && data.routes && data.routes[0] && data.routes[0].geometry
-        ? data.routes[0].geometry.coordinates
-        : [];
+      let coordinates = [];
+      if (data && data.code === 'Ok' && data.matchings && data.matchings.length) {
+        coordinates = data.matchings
+          .map((matching) => matching && matching.geometry && matching.geometry.coordinates ? matching.geometry.coordinates : [])
+          .flat();
+      } else if (data && data.code === 'Ok' && data.routes && data.routes[0] && data.routes[0].geometry) {
+        coordinates = data.routes[0].geometry.coordinates;
+      }
       if (!Array.isArray(coordinates) || coordinates.length < 2) throw new Error('Road route empty');
       return coordinates
         .map((coordinate) => [Number(coordinate[1]), Number(coordinate[0])])
