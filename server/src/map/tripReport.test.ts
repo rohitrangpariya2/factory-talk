@@ -23,7 +23,7 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('function drawTripOnMap(trip, index)');
     expect(indexSource).toContain('function showLiveMap()');
     expect(indexSource).toContain('const tripRouteCache = new Map()');
-    expect(indexSource).toContain('Current trip');
+    expect(indexSource).toContain('Aaj ni trips');
     expect(indexSource).toContain('Map ma kholo');
     expect(indexSource).toContain("reportBox('Trip km'");
     expect(indexSource).toContain("reportBox('Stops'");
@@ -37,12 +37,10 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('shouldAutoFitTripBounds = true');
   });
 
-  test('shows only the current active trip in the trip drawer', () => {
-    expect(indexSource).toContain('const activeTrip = trips.find((trip) => !trip.isComplete)');
-    expect(indexSource).toContain('const visibleTrips = activeTrip ? [activeTrip] : []');
-    expect(indexSource).toContain('currentTrips = visibleTrips');
-    expect(indexSource).toContain('visibleTrips.map(renderTripCard).join');
-    expect(indexSource).not.toContain('trips.map(renderTripCard).join');
+  test('shows full trip history in the trip drawer', () => {
+    expect(indexSource).toContain('currentTrips = trips');
+    expect(indexSource).toContain('trips.map(renderTripCard).join');
+    expect(indexSource).toContain('Aaj no trip summary');
   });
 
   test('marks holds only after two minutes away from the factory', () => {

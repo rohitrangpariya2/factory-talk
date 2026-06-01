@@ -707,23 +707,21 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
       const selectedName = escapeText(userPoints[userPoints.length - 1].name || 'Factory Phone');
       const trips = splitFactoryTrips(userPoints);
-      const activeTrip = trips.find((trip) => !trip.isComplete);
-      const visibleTrips = activeTrip ? [activeTrip] : [];
-      currentTrips = visibleTrips;
-      if (selectedTripIndex >= visibleTrips.length) {
+      currentTrips = trips;
+      if (selectedTripIndex >= trips.length) {
         selectedTripIndex = -1;
         selectedTripSignature = '';
         shouldAutoFitTripBounds = true;
         tripLayers.clearLayers();
       }
-      if (!visibleTrips.length) {
+      if (!trips.length) {
         selectedTripIndex = -1;
         shouldAutoFitTripBounds = true;
         tripLayers.clearLayers();
         setLiveLayersVisible(true);
-        updateTripDrawerChrome('Current trip - ' + selectedName, 'Active trip nathi');
-        timeline.innerHTML = '<div class="timeline-title">Current trip - ' + selectedName + '</div>' +
-          '<div class="muted">Atyare active trip nathi. Factory thi bahar nikalse tyare current trip ane road route dekhase.</div>';
+        updateTripDrawerChrome('Trip Details - ' + selectedName, 'Factory thi bahar jashe tyare Trip 1 start thase');
+        timeline.innerHTML = '<div class="timeline-title">Trip Report - ' + selectedName + '</div>' +
+          '<div class="muted">Aa user haju factory zone mathi bahar nikalyo nathi. Factory thi bahar jashe tyare Trip 1 start thase.</div>';
         return;
       }
       if (selectedTripIndex < 0) {
@@ -732,21 +730,21 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         shouldAutoFitTripBounds = true;
       }
 
-      const summary = buildTripSummary(visibleTrips);
+      const summary = buildTripSummary(trips);
       updateTripDrawerChrome(
-        'Current trip - ' + selectedName,
-        formatDistance(summary.totalDistanceMeters) + ' - tap karo details mate'
+        'Aaj ni trips - ' + selectedName,
+        summary.totalTrips + ' trip, ' + formatDistance(summary.totalDistanceMeters) + ' - tap karo details mate'
       );
       timeline.innerHTML =
         '<div class="trip-toolbar">' +
-          '<div class="timeline-title">Current trip - ' + selectedName + '</div>' +
+          '<div class="timeline-title">Aaj ni trips - ' + selectedName + '</div>' +
           '<button onclick="showLiveMap()">Live Map</button>' +
         '</div>' +
         renderTripSummary(summary) +
-        visibleTrips.map(renderTripCard).join('');
+        trips.map(renderTripCard).join('');
 
       if (selectedTripIndex >= 0) {
-        drawTripOnMap(visibleTrips[selectedTripIndex], selectedTripIndex);
+        drawTripOnMap(trips[selectedTripIndex], selectedTripIndex);
       } else {
         selectedTripSignature = '';
         tripLayers.clearLayers();
@@ -772,7 +770,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
     function renderTripSummary(summary) {
       return '<div class="timeline-item">' +
-        '<div class="timeline-time">Current trip summary</div>' +
+        '<div class="timeline-time">Aaj no trip summary</div>' +
         '<div class="report-grid">' +
           reportBox('Total trips', String(summary.totalTrips)) +
           reportBox('Active trips', String(summary.activeTrips)) +
