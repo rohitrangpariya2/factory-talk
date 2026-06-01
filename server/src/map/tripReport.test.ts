@@ -58,16 +58,16 @@ describe('factory trip report map script', () => {
   test('does not draw selected trip routes from raw GPS points', () => {
     expect(indexSource).toContain('function roadRouteCacheKey(points, fallbackKey)');
     expect(indexSource).toContain('function setSelectedHistoryLineVisible(visible)');
-    expect(indexSource).toContain('const routeLine = L.polyline([], {');
+    expect(indexSource).toContain('const routeLines = segments.map(() => L.polyline([], {');
     expect(indexSource).toContain('setSelectedHistoryLineVisible(false)');
     expect(indexSource).toContain('routeLine.setLatLngs(roadLatLngs)');
     expect(indexSource).not.toContain('const routeLine = L.polyline(latLngs, {');
   });
 
   test('falls back to raw trip line when road matching fails', () => {
-    expect(indexSource).toContain('routeLine.setLatLngs(latLngs)');
+    expect(indexSource).toContain('routeLine.setLatLngs(segmentLatLngs)');
     expect(indexSource).toContain('.catch(() => {');
-    expect(indexSource).toContain('if (selectedTripSignature === signature) {');
+    expect(indexSource).toContain('if (selectedTripSignature === signature) routeLine.setLatLngs(segmentLatLngs);');
   });
 
   test('does not show avg or max speed in the trip report', () => {
@@ -95,7 +95,9 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('const LIVE_TRAIL_MAX_AGE_MS = 10 * 60 * 1000');
     expect(indexSource).toContain("const LIVE_TRAIL_COLOR = '#2563eb'");
     expect(indexSource).toContain('function filterStablePoints(points)');
+    expect(indexSource).toContain('function splitStableRouteSegments(points)');
     expect(indexSource).toContain('MAX_GPS_JUMP_SPEED_KMH = 110');
+    expect(indexSource).toContain('ROUTE_SEGMENT_BREAK_SPEED_KMH = 85');
     expect(indexSource).toContain('MAX_GPS_JUMP_METERS = 450');
     expect(indexSource).toContain('function liveTrailPoints(points)');
     expect(indexSource).toContain('const stablePoints = filterStablePoints(points)');

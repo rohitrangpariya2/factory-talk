@@ -406,6 +406,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const historyLines = new Map();
     const tripLayers = L.layerGroup().addTo(map);
     const tripRouteCache = new Map();
+    const liveRouteInflight = new Set();
     const LIVE_TRAIL_MAX_POINTS = 25;
     const LIVE_TRAIL_MAX_AGE_MS = 10 * 60 * 1000;
     const LIVE_TRAIL_COLOR = '#2563eb';
@@ -490,6 +491,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const MAX_GPS_JUMP_METERS = 450;
     const MIN_GPS_JUMP_INTERVAL_MS = 4000;
     const MAX_FILTERED_ACCURACY_METERS = 120;
+    const ROUTE_SEGMENT_BREAK_METERS = 260;
+    const ROUTE_SEGMENT_BREAK_SPEED_KMH = 85;
+    const ROUTE_SEGMENT_BREAK_GAP_MS = 90_000;
 
     function filterStablePoints(points) {
       const sorted = points
@@ -515,6 +519,33 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }
 
       return stable.length >= 2 ? stable : sorted.slice(-2);
+    }
+
+    function splitStableRouteSegments(points) {
+      const stable = filterStablePoints(points);
+      if (stable.length < 2) return [];
+      const segments = [];
+      let current = [stable[0]];
+      for (let index = 1; index < stable.length; index += 1) {
+        const prev = stable[index - 1];
+        const next = stable[index];
+        const deltaMs = Math.max(1, Number(next.locationUpdatedAt || 0) - Number(prev.locationUpdatedAt || 0));
+        const distance = distanceMeters(prev, next);
+        const speedKmh = (distance / 1000) / (deltaMs / 3600000);
+        const shouldBreak =
+          deltaMs > ROUTE_SEGMENT_BREAK_GAP_MS ||
+          distance > ROUTE_SEGMENT_BREAK_METERS ||
+          speedKmh > ROUTE_SEGMENT_BREAK_SPEED_KMH;
+
+        if (shouldBreak) {
+          if (current.length >= 2) segments.push(current);
+          current = [next];
+        } else {
+          current.push(next);
+        }
+      }
+      if (current.length >= 2) segments.push(current);
+      return segments;
     }
 
     function speedKmh(distanceMetersValue, durationMs) {
@@ -570,8 +601,13 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       grouped.forEach((userPoints, key) => {
         userPoints.sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
         const trailPoints = liveTrailPoints(userPoints);
-        const latLngs = trailPoints.map((point) => [point.latitude, point.longitude]);
-        if (latLngs.length < 2) return;
+        const segments = splitStableRouteSegments(trailPoints);
+        if (!segments.length) return;
+
+        const rawSegmentLatLngs = segments.map((segmentPoints) =>
+          segmentPoints.map((point) => [point.latitude, point.longitude])
+        );
+        const latLngs = rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs;
         const color = LIVE_TRAIL_COLOR;
         if (!historyLines.has(key)) {
           historyLines.set(key, L.polyline(latLngs, {
@@ -586,6 +622,35 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           historyLines.get(key).setLatLngs(latLngs);
           historyLines.get(key).setStyle({ color, weight: 2, opacity: 0.45, dashArray: '2 8' });
         }
+
+        segments.forEach((segmentPoints, segmentIndex) => {
+          const roadPoints = sampleRoadTrailPoints(segmentPoints);
+          if (roadPoints.length < 2) return;
+          const routeCacheKey = roadRouteCacheKey(roadPoints, key + ':live:' + segmentIndex);
+          const cachedRoute = tripRouteCache.get(routeCacheKey);
+          if (cachedRoute && cachedRoute.length > 1) {
+            rawSegmentLatLngs[segmentIndex] = cachedRoute;
+            historyLines.get(key).setLatLngs(rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs);
+            return;
+          }
+          if (liveRouteInflight.has(routeCacheKey)) return;
+          liveRouteInflight.add(routeCacheKey);
+          fetchRoadLatLngs(roadPoints)
+            .then((roadLatLngs) => {
+              if (roadLatLngs.length > 1) {
+                tripRouteCache.set(routeCacheKey, roadLatLngs);
+                rawSegmentLatLngs[segmentIndex] = roadLatLngs;
+                const line = historyLines.get(key);
+                if (line) line.setLatLngs(rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs);
+              }
+            })
+            .catch(() => {
+              // Keep filtered raw GPS path when road snapping fails.
+            })
+            .finally(() => {
+              liveRouteInflight.delete(routeCacheKey);
+            });
+        });
       });
 
       historyLines.forEach((line, key) => {
@@ -1006,48 +1071,50 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       selectedTripSignature = signature;
       tripLayers.clearLayers();
 
-      const latLngs = trip.points
-        .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
-        .map((point) => [point.latitude, point.longitude]);
+      const segments = splitStableRouteSegments(trip.points);
+      const latLngs = segments.flat().map((point) => [point.latitude, point.longitude]);
       if (!latLngs.length) return;
 
       const title = trip.isComplete ? 'Trip ' + (index + 1) : 'Active Trip';
       const report = buildTripReport(trip.points);
-      const routeLine = L.polyline([], {
+      const routeLines = segments.map(() => L.polyline([], {
         color: '#1d9bf0',
         weight: 6,
         opacity: 0.9,
         lineCap: 'round',
         lineJoin: 'round'
-      }).addTo(tripLayers).bindPopup(title + '<br>' + formatDistance(report.distanceMeters));
+      }).addTo(tripLayers).bindPopup(title + '<br>' + formatDistance(report.distanceMeters)));
 
-      const roadPoints = sampleRoadTrailPoints(trip.points);
-      const routeCacheKey = roadRouteCacheKey(roadPoints, signature);
-      const cachedRoute = tripRouteCache.get(routeCacheKey);
-      if (cachedRoute && cachedRoute.length > 1) {
-        routeLine.setLatLngs(cachedRoute);
-      } else if (roadPoints.length > 1) {
-        fetchRoadLatLngs(roadPoints)
-          .then((roadLatLngs) => {
-            if (roadLatLngs.length > 1) {
-              tripRouteCache.set(routeCacheKey, roadLatLngs);
-              if (selectedTripSignature === signature) {
-                routeLine.setLatLngs(roadLatLngs);
+      segments.forEach((segmentPoints, segmentIndex) => {
+        const segmentLatLngs = segmentPoints.map((point) => [point.latitude, point.longitude]);
+        const routeLine = routeLines[segmentIndex];
+        const roadPoints = sampleRoadTrailPoints(segmentPoints);
+        const routeCacheKey = roadRouteCacheKey(roadPoints, signature + ':seg:' + segmentIndex);
+        const cachedRoute = tripRouteCache.get(routeCacheKey);
+
+        if (cachedRoute && cachedRoute.length > 1) {
+          routeLine.setLatLngs(cachedRoute);
+          return;
+        }
+
+        if (roadPoints.length > 1) {
+          fetchRoadLatLngs(roadPoints)
+            .then((roadLatLngs) => {
+              if (roadLatLngs.length > 1) {
+                tripRouteCache.set(routeCacheKey, roadLatLngs);
+                if (selectedTripSignature === signature) routeLine.setLatLngs(roadLatLngs);
+                return;
               }
-              return;
-            }
-            if (selectedTripSignature === signature) {
-              routeLine.setLatLngs(latLngs);
-            }
-          })
-          .catch(() => {
-            if (selectedTripSignature === signature) {
-              routeLine.setLatLngs(latLngs);
-            }
-          });
-      } else {
-        routeLine.setLatLngs(latLngs);
-      }
+              if (selectedTripSignature === signature) routeLine.setLatLngs(segmentLatLngs);
+            })
+            .catch(() => {
+              if (selectedTripSignature === signature) routeLine.setLatLngs(segmentLatLngs);
+            });
+          return;
+        }
+
+        routeLine.setLatLngs(segmentLatLngs);
+      });
 
       const first = trip.points[0];
       const last = trip.points[trip.points.length - 1];
