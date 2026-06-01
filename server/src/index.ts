@@ -406,6 +406,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const historyLines = new Map();
     const tripLayers = L.layerGroup().addTo(map);
     const tripRouteCache = new Map();
+    const LIVE_TRAIL_MAX_POINTS = 80;
+    const LIVE_TRAIL_MAX_AGE_MS = 30 * 60 * 1000;
+    const LIVE_TRAIL_COLOR = '#2563eb';
     let savedHistory = [];
     let lastHistoryPoints = [];
     let currentTrips = [];
@@ -512,6 +515,15 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         '<a style="color:#38bdf8" target="_blank" rel="noopener" href="' + mapsUrl + '">Open in Google Maps</a>';
     }
 
+    function liveTrailPoints(points) {
+      if (points.length < 2) return points;
+      const last = points[points.length - 1];
+      const cutoff = Number(last.locationUpdatedAt || 0) - LIVE_TRAIL_MAX_AGE_MS;
+      const recent = points.filter((point) => Number(point.locationUpdatedAt || 0) >= cutoff);
+      const trail = recent.length >= 2 ? recent : points;
+      return trail.slice(-LIVE_TRAIL_MAX_POINTS);
+    }
+
     function updateHistory(points) {
       const grouped = new Map();
       points.forEach((point) => {
@@ -523,24 +535,24 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
       grouped.forEach((userPoints, key) => {
         userPoints.sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
-        const latLngs = userPoints.map((point) => [point.latitude, point.longitude]);
+        const trailPoints = liveTrailPoints(userPoints);
+        const latLngs = trailPoints.map((point) => [point.latitude, point.longitude]);
         if (latLngs.length < 2) return;
-        const last = userPoints[userPoints.length - 1];
-        const color = statusFor(last).color;
+        const color = LIVE_TRAIL_COLOR;
         if (!historyLines.has(key)) {
           historyLines.set(key, L.polyline(latLngs, {
             color,
-            weight: 4,
-            opacity: 0.55,
+            weight: 3,
+            opacity: 0.6,
             lineCap: 'round',
             lineJoin: 'round',
             dashArray: '4 6'
           }).addTo(map));
         } else {
           historyLines.get(key).setLatLngs(latLngs);
-          historyLines.get(key).setStyle({ color, opacity: 0.55, dashArray: '4 6' });
+          historyLines.get(key).setStyle({ color, weight: 3, opacity: 0.6, dashArray: '4 6' });
         }
-        applyRoadTrail(key, userPoints, historyLines.get(key), color);
+        applyRoadTrail(key, trailPoints, historyLines.get(key), color);
       });
 
       historyLines.forEach((line, key) => {

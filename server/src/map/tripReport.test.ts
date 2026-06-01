@@ -48,4 +48,13 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('function updateTripDrawerChrome(title, subtitle)');
     expect(indexSource).toContain('timeline.classList.toggle');
   });
+
+  test('keeps live route lines short so the map stays readable', () => {
+    expect(indexSource).toContain('const LIVE_TRAIL_MAX_POINTS = 80');
+    expect(indexSource).toContain('const LIVE_TRAIL_MAX_AGE_MS = 30 * 60 * 1000');
+    expect(indexSource).toContain("const LIVE_TRAIL_COLOR = '#2563eb'");
+    expect(indexSource).toContain('function liveTrailPoints(points)');
+    expect(indexSource).toContain('const trailPoints = liveTrailPoints(userPoints)');
+    expect(indexSource).toContain('applyRoadTrail(key, trailPoints');
+  });
 });
