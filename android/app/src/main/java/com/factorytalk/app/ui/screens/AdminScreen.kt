@@ -564,7 +564,7 @@ private fun DutyLocationsCard(users: List<User>) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Button(
                     onClick = {
-                        val uri = Uri.parse("${Constants.SERVER_URL.trimEnd('/')}/delivery/${Uri.encode(user.id)}")
+                        val uri = Uri.parse("${Constants.SERVER_URL.trimEnd('/')}/map/${Uri.encode(user.id)}")
                         val mapIntent = Intent(Intent.ACTION_VIEW, uri)
                         runCatching { context.startActivity(mapIntent) }
                     }
