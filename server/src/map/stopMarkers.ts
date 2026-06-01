@@ -21,7 +21,12 @@ export function buildStopMarkersScript(): string {
           .slice()
           .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0)));
         if (reportPoints.length < 2) return;
-        const report = buildTripReport(reportPoints);
+        const activeTrip = splitFactoryTrips(reportPoints).find((trip) => !trip.isComplete);
+        const stopSourcePoints = forceLiveMapMode
+          ? (activeTrip ? activeTrip.points : [])
+          : reportPoints;
+        if (stopSourcePoints.length < 2) return;
+        const report = buildTripReport(stopSourcePoints);
         report.stops.forEach((stop, index) => {
           const markerKey = stopMarkerKey(key, stop, index);
           visibleKeys.add(markerKey);

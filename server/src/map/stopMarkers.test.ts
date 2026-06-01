@@ -8,6 +8,8 @@ describe('stop marker script', () => {
     expect(script).toContain('stopMarkers');
     expect(script).toContain("fillColor: '#ef4444'");
     expect(script).toContain('buildTripReport');
+    expect(script).toContain('forceLiveMapMode');
+    expect(script).toContain('splitFactoryTrips(reportPoints)');
     expect(script).toContain('1 min thi vadhu');
   });
 });
