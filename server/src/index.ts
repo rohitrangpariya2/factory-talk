@@ -824,7 +824,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         return;
       }
       if (selectedTripIndex < 0 && !forceLiveMapMode) {
-        selectedTripIndex = 0;
+        // Select active trip if exists, otherwise latest completed trip
+        const activeIndex = trips.findIndex((trip) => !trip.isComplete);
+        selectedTripIndex = activeIndex >= 0 ? activeIndex : trips.length - 1;
         selectedTripSignature = '';
         shouldAutoFitTripBounds = true;
       }
