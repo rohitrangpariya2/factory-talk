@@ -406,8 +406,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const historyLines = new Map();
     const tripLayers = L.layerGroup().addTo(map);
     const tripRouteCache = new Map();
-    const LIVE_TRAIL_MAX_POINTS = 80;
-    const LIVE_TRAIL_MAX_AGE_MS = 30 * 60 * 1000;
+    const LIVE_TRAIL_MAX_POINTS = 25;
+    const LIVE_TRAIL_MAX_AGE_MS = 10 * 60 * 1000;
     const LIVE_TRAIL_COLOR = '#2563eb';
     let savedHistory = [];
     let lastHistoryPoints = [];
@@ -542,17 +542,16 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         if (!historyLines.has(key)) {
           historyLines.set(key, L.polyline(latLngs, {
             color,
-            weight: 3,
-            opacity: 0.6,
+            weight: 2,
+            opacity: 0.45,
             lineCap: 'round',
             lineJoin: 'round',
-            dashArray: '4 6'
+            dashArray: '2 8'
           }).addTo(map));
         } else {
           historyLines.get(key).setLatLngs(latLngs);
-          historyLines.get(key).setStyle({ color, weight: 3, opacity: 0.6, dashArray: '4 6' });
+          historyLines.get(key).setStyle({ color, weight: 2, opacity: 0.45, dashArray: '2 8' });
         }
-        applyRoadTrail(key, trailPoints, historyLines.get(key), color);
       });
 
       historyLines.forEach((line, key) => {
