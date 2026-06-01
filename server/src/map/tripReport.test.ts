@@ -37,6 +37,13 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('shouldAutoFitTripBounds = true');
   });
 
+  test('keeps live mode active after pressing live map button', () => {
+    expect(indexSource).toContain('let forceLiveMapMode = false');
+    expect(indexSource).toContain('if (selectedTripIndex < 0 && !forceLiveMapMode)');
+    expect(indexSource).toContain('function showLiveMap()');
+    expect(indexSource).toContain('forceLiveMapMode = true');
+  });
+
   test('shows full trip history in the trip drawer', () => {
     expect(indexSource).toContain('currentTrips = trips');
     expect(indexSource).toContain('trips.map(renderTripCard).join');

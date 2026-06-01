@@ -415,6 +415,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     let selectedTripIndex = -1;
     let selectedTripSignature = '';
     let shouldAutoFitTripBounds = true;
+    let forceLiveMapMode = false;
     let selectedTimelineUserId = userId || '';
     let tripDrawerExpanded = false;
     let firstFix = true;
@@ -717,6 +718,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       if (!trips.length) {
         selectedTripIndex = -1;
         shouldAutoFitTripBounds = true;
+        forceLiveMapMode = false;
         tripLayers.clearLayers();
         setLiveLayersVisible(true);
         updateTripDrawerChrome('Trip Details - ' + selectedName, 'Factory thi bahar jashe tyare Trip 1 start thase');
@@ -724,7 +726,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           '<div class="muted">Aa user haju factory zone mathi bahar nikalyo nathi. Factory thi bahar jashe tyare Trip 1 start thase.</div>';
         return;
       }
-      if (selectedTripIndex < 0) {
+      if (selectedTripIndex < 0 && !forceLiveMapMode) {
         selectedTripIndex = 0;
         selectedTripSignature = '';
         shouldAutoFitTripBounds = true;
@@ -1041,6 +1043,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
 
     function openTripOnMap(index) {
+      forceLiveMapMode = false;
       selectedTripIndex = index;
       selectedTripSignature = '';
       shouldAutoFitTripBounds = true;
@@ -1048,6 +1051,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
 
     function showLiveMap() {
+      forceLiveMapMode = true;
       selectedTripIndex = -1;
       selectedTripSignature = '';
       shouldAutoFitTripBounds = false;
@@ -1060,6 +1064,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     window.showLiveMap = showLiveMap;
 
     window.focusUser = function(id) {
+      forceLiveMapMode = false;
       selectedTimelineUserId = id;
       selectedTripIndex = -1;
       selectedTripSignature = '';
