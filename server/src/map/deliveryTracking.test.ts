@@ -28,4 +28,10 @@ describe('delivery tracking page route', () => {
     expect(indexSource).toContain('function updateRoute(points)');
     expect(indexSource).toContain('fetchRoadLatLngs(roadPoints)');
   });
+
+  test('falls back to latest history point when live location is unavailable', () => {
+    expect(indexSource).toContain('const liveLocation = (data.locations || []).find((item) => item.userId === userId)');
+    expect(indexSource).toContain('const lastHistoryPoint = historyPoints.length ? historyPoints[historyPoints.length - 1] : null');
+    expect(indexSource).toContain('const location = liveLocation || lastHistoryPoint');
+  });
 });

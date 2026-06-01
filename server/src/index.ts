@@ -455,15 +455,18 @@ app.get('/delivery/:userId', (req, res) => {
         const historyResponse = await fetch('/locations/history?userId=' + encodeURIComponent(userId), { cache: 'no-store' });
         const data = await response.json();
         const historyData = await historyResponse.json();
-        const location = (data.locations || []).find((item) => item.userId === userId);
+        const liveLocation = (data.locations || []).find((item) => item.userId === userId);
         historyPoints = (historyData.history || [])
           .filter((point) => point.userId === userId)
           .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
           .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+        const lastHistoryPoint = historyPoints.length ? historyPoints[historyPoints.length - 1] : null;
+        const location = liveLocation || lastHistoryPoint;
 
         if (!location) {
           document.getElementById('onlineText').textContent = 'Offline';
           document.getElementById('onlineDot').style.background = '#94a3b8';
+          document.getElementById('lastUpdated').textContent = 'No location received yet';
           return;
         }
 
