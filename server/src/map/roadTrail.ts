@@ -4,7 +4,7 @@ export function buildRoadTrailScript(): string {
     const ROAD_ROUTE_MAX_POINTS = 60;
     const ROAD_ROUTE_MIN_DISTANCE_METERS = 20;
     const ROAD_ROUTE_MIN_TIME_MS = 20000;
-    const ROAD_ROUTE_MAX_ACCURACY_METERS = 150;
+    const ROAD_ROUTE_MAX_ACCURACY_METERS = 50;
     map.attributionControl.addAttribution('Routes: OSRM');
 
     function sampleRoadTrailPoints(points) {

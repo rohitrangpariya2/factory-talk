@@ -21,7 +21,7 @@ describe('road route proxy helpers', () => {
     const url = buildOsrmRouteUrl('72.938619,21.259844;72.875577,21.218610');
 
     expect(url).toBe(
-      'https://router.project-osrm.org/route/v1/driving/72.938619,21.259844;72.875577,21.218610?overview=full&geometries=geojson&steps=false&annotations=false'
+      'https://router.project-osrm.org/route/v1/driving/72.938619,21.259844;72.875577,21.218610?overview=full&geometries=geojson&steps=false&annotations=false&radiuses=25;25'
     );
   });
 });

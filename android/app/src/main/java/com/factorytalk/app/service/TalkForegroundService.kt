@@ -15,6 +15,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.os.BatteryManager
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -339,6 +340,7 @@ class TalkForegroundService : Service() {
     private fun sendLastKnownLocation(allowStaleHeartbeat: Boolean = false) {
         val location = lastKnownLocation ?: return
         val now = System.currentTimeMillis()
+        val batteryLevel = getBatteryLevel()
         val isFreshLocation = !isLocationStale(location, Constants.LOCATION_FIX_STALE_MS)
         if (!isFreshLocation) {
             if (
@@ -351,15 +353,32 @@ class TalkForegroundService : Service() {
                 return
             }
 
-            signalingClient.sendLocation(location.latitude, location.longitude, location.accuracy)
+            signalingClient.sendLocation(
+                location.latitude,
+                location.longitude,
+                location.accuracy,
+                batteryLevel = batteryLevel
+            )
             lastStaleLocationHeartbeatAt = now
             saveLocationSent(location, "Last location heartbeat sent")
             return
         }
 
-        signalingClient.sendLocation(location.latitude, location.longitude, location.accuracy, location.time)
+        signalingClient.sendLocation(
+            location.latitude,
+            location.longitude,
+            location.accuracy,
+            location.time,
+            batteryLevel
+        )
         hasSentFreshLocation = true
         saveLocationSent(location, "Location sent")
+    }
+
+    private fun getBatteryLevel(): Int? {
+        val manager = getSystemService(BATTERY_SERVICE) as? BatteryManager ?: return null
+        val level = manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        return if (level in 0..100) level else null
     }
 
     private fun saveLocationSent(location: Location, status: String) {
