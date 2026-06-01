@@ -414,6 +414,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     let currentTrips = [];
     let selectedTripIndex = -1;
     let selectedTripSignature = '';
+    let shouldAutoFitTripBounds = true;
     let selectedTimelineUserId = userId || '';
     let tripDrawerExpanded = false;
     let firstFix = true;
@@ -712,10 +713,12 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       if (selectedTripIndex >= visibleTrips.length) {
         selectedTripIndex = -1;
         selectedTripSignature = '';
+        shouldAutoFitTripBounds = true;
         tripLayers.clearLayers();
       }
       if (!visibleTrips.length) {
         selectedTripIndex = -1;
+        shouldAutoFitTripBounds = true;
         tripLayers.clearLayers();
         setLiveLayersVisible(true);
         updateTripDrawerChrome('Current trip - ' + selectedName, 'Active trip nathi');
@@ -726,6 +729,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       if (selectedTripIndex < 0) {
         selectedTripIndex = 0;
         selectedTripSignature = '';
+        shouldAutoFitTripBounds = true;
       }
 
       const summary = buildTripSummary(visibleTrips);
@@ -994,12 +998,22 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           .then((roadLatLngs) => {
             if (roadLatLngs.length > 1) {
               tripRouteCache.set(routeCacheKey, roadLatLngs);
+              if (selectedTripSignature === signature) {
+                routeLine.setLatLngs(roadLatLngs);
+              }
+              return;
             }
-            if (selectedTripSignature === signature && roadLatLngs.length > 1) {
-              routeLine.setLatLngs(roadLatLngs);
+            if (selectedTripSignature === signature) {
+              routeLine.setLatLngs(latLngs);
             }
           })
-          .catch(() => {});
+          .catch(() => {
+            if (selectedTripSignature === signature) {
+              routeLine.setLatLngs(latLngs);
+            }
+          });
+      } else {
+        routeLine.setLatLngs(latLngs);
       }
 
       const first = trip.points[0];
@@ -1022,20 +1036,23 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
       const bounds = L.latLngBounds(latLngs);
       report.stops.forEach((stop) => bounds.extend([stop.latitude, stop.longitude]));
-      if (bounds.isValid()) {
+      if (bounds.isValid() && shouldAutoFitTripBounds) {
         map.fitBounds(bounds, { padding: [46, 46], maxZoom: 17 });
+        shouldAutoFitTripBounds = false;
       }
     }
 
     function openTripOnMap(index) {
       selectedTripIndex = index;
       selectedTripSignature = '';
+      shouldAutoFitTripBounds = true;
       renderTripReport(lastHistoryPoints);
     }
 
     function showLiveMap() {
       selectedTripIndex = -1;
       selectedTripSignature = '';
+      shouldAutoFitTripBounds = false;
       tripLayers.clearLayers();
       setLiveLayersVisible(true);
       renderTripReport(lastHistoryPoints);
@@ -1048,6 +1065,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       selectedTimelineUserId = id;
       selectedTripIndex = -1;
       selectedTripSignature = '';
+      shouldAutoFitTripBounds = true;
       tripLayers.clearLayers();
       setLiveLayersVisible(true);
       const marker = markers.get(id);

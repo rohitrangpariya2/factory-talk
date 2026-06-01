@@ -29,6 +29,14 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain("reportBox('Stops'");
   });
 
+  test('auto fits trip bounds only once so manual zoom is not overridden', () => {
+    expect(indexSource).toContain('let shouldAutoFitTripBounds = true');
+    expect(indexSource).toContain('if (bounds.isValid() && shouldAutoFitTripBounds)');
+    expect(indexSource).toContain('shouldAutoFitTripBounds = false');
+    expect(indexSource).toContain('function openTripOnMap(index)');
+    expect(indexSource).toContain('shouldAutoFitTripBounds = true');
+  });
+
   test('shows only the current active trip in the trip drawer', () => {
     expect(indexSource).toContain('const activeTrip = trips.find((trip) => !trip.isComplete)');
     expect(indexSource).toContain('const visibleTrips = activeTrip ? [activeTrip] : []');
@@ -49,6 +57,12 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('setSelectedHistoryLineVisible(false)');
     expect(indexSource).toContain('routeLine.setLatLngs(roadLatLngs)');
     expect(indexSource).not.toContain('const routeLine = L.polyline(latLngs, {');
+  });
+
+  test('falls back to raw trip line when road matching fails', () => {
+    expect(indexSource).toContain('routeLine.setLatLngs(latLngs)');
+    expect(indexSource).toContain('.catch(() => {');
+    expect(indexSource).toContain('if (selectedTripSignature === signature) {');
   });
 
   test('does not show avg or max speed in the trip report', () => {
