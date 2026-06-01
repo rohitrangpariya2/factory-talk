@@ -29,10 +29,7 @@ export function normalizeRoadRouteCoordinates(input: string): string | null {
 }
 
 export function buildOsrmRouteUrl(coordinates: string): string {
-  const radiuses = coordinates
-    .split(';')
-    .filter(Boolean)
-    .map(() => '25')
-    .join(';');
-  return `${OSRM_ROUTE_BASE_URL}${coordinates}?overview=full&geometries=geojson&steps=false&annotations=false&radiuses=${radiuses}`;
+  const count = coordinates.split(';').length;
+  const radiuses = Array(count).fill('10').join(';');
+  return `${OSRM_ROUTE_BASE_URL}${coordinates}?overview=full&geometries=geojson&steps=false&gaps=ignore&annotations=false&radiuses=${encodeURIComponent(radiuses)}`;
 }

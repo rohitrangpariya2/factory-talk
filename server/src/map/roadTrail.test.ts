@@ -8,7 +8,7 @@ describe('road trail script', () => {
     expect(script).toContain('ROAD_ROUTE_MAX_POINTS = 60');
     expect(script).toContain('ROAD_ROUTE_MIN_DISTANCE_METERS = 20');
     expect(script).toContain('ROAD_ROUTE_MIN_TIME_MS = 20000');
-    expect(script).toContain('ROAD_ROUTE_MAX_ACCURACY_METERS = 50');
+    expect(script).toContain('ROAD_ROUTE_MAX_ACCURACY_METERS = 30');
     expect(script).toContain("Routes: OSRM");
     expect(script).toContain('function sampleRoadTrailPoints(points)');
     expect(script).toContain('async function fetchRoadLatLngs(points)');

@@ -4,7 +4,7 @@ export function buildRoadTrailScript(): string {
     const ROAD_ROUTE_MAX_POINTS = 60;
     const ROAD_ROUTE_MIN_DISTANCE_METERS = 20;
     const ROAD_ROUTE_MIN_TIME_MS = 20000;
-    const ROAD_ROUTE_MAX_ACCURACY_METERS = 50;
+    const ROAD_ROUTE_MAX_ACCURACY_METERS = 30;
     map.attributionControl.addAttribution('Routes: OSRM');
 
     function sampleRoadTrailPoints(points) {
@@ -21,6 +21,8 @@ export function buildRoadTrailScript(): string {
         const last = distinct[distinct.length - 1];
         const isLast = index === sourcePoints.length - 1;
         const gapMs = last ? Math.abs(Number(point.locationUpdatedAt || 0) - Number(last.locationUpdatedAt || 0)) : 0;
+        const speedKmh = last ? (distanceMeters(last, point) / (gapMs / 3600000)) / 1000 : 0;
+        if (last && gapMs > 0 && speedKmh > 80) return;
         const distance = last ? distanceMeters(last, point) : Infinity;
         if (
           !last ||
@@ -61,9 +63,24 @@ export function buildRoadTrailScript(): string {
           .flat();
       }
       if (!Array.isArray(coordinates) || coordinates.length < 2) throw new Error('Road route empty');
-      return coordinates
+      const roadLatLngs = coordinates
         .map((coordinate) => [Number(coordinate[1]), Number(coordinate[0])])
         .filter((coordinate) => Number.isFinite(coordinate[0]) && Number.isFinite(coordinate[1]));
+
+      const gpsBounds = {
+        minLat: Math.min(...points.map(p => p.latitude)),
+        maxLat: Math.max(...points.map(p => p.latitude)),
+        minLng: Math.min(...points.map(p => p.longitude)),
+        maxLng: Math.max(...points.map(p => p.longitude)),
+      };
+      const MARGIN = 0.001;
+      const outOfBounds = roadLatLngs.some(([lat, lng]) =>
+        lat < gpsBounds.minLat - MARGIN || lat > gpsBounds.maxLat + MARGIN ||
+        lng < gpsBounds.minLng - MARGIN || lng > gpsBounds.maxLng + MARGIN
+      );
+      if (outOfBounds) throw new Error('Road route deviates too far from GPS path');
+
+      return roadLatLngs;
     }
   `;
 }
