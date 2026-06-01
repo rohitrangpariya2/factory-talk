@@ -623,6 +623,11 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       stopMarkers.forEach((marker) => setLayerVisible(marker, visible));
     }
 
+    function setSelectedHistoryLineVisible(visible) {
+      const line = historyLines.get(selectedTimelineUserId);
+      if (line) setLayerVisible(line, visible);
+    }
+
     function setTripDrawerExpanded(expanded) {
       tripDrawerExpanded = !!expanded;
       const drawer = document.getElementById('tripDrawer');
@@ -701,37 +706,43 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
       const selectedName = escapeText(userPoints[userPoints.length - 1].name || 'Factory Phone');
       const trips = splitFactoryTrips(userPoints);
-      currentTrips = trips;
-      if (selectedTripIndex >= trips.length) {
+      const activeTrip = trips.find((trip) => !trip.isComplete);
+      const visibleTrips = activeTrip ? [activeTrip] : [];
+      currentTrips = visibleTrips;
+      if (selectedTripIndex >= visibleTrips.length) {
         selectedTripIndex = -1;
         selectedTripSignature = '';
         tripLayers.clearLayers();
       }
-      if (!trips.length) {
+      if (!visibleTrips.length) {
         selectedTripIndex = -1;
         tripLayers.clearLayers();
         setLiveLayersVisible(true);
-        updateTripDrawerChrome('Trip Details - ' + selectedName, 'Factory thi bahar jashe tyare Trip 1 start thase');
-        timeline.innerHTML = '<div class="timeline-title">Trip Report - ' + selectedName + '</div>' +
-          '<div class="muted">Aa user haju factory zone mathi bahar nikalyo nathi. Factory thi bahar jashe tyare Trip 1 start thase.</div>';
+        updateTripDrawerChrome('Current trip - ' + selectedName, 'Active trip nathi');
+        timeline.innerHTML = '<div class="timeline-title">Current trip - ' + selectedName + '</div>' +
+          '<div class="muted">Atyare active trip nathi. Factory thi bahar nikalse tyare current trip ane road route dekhase.</div>';
         return;
       }
+      if (selectedTripIndex < 0) {
+        selectedTripIndex = 0;
+        selectedTripSignature = '';
+      }
 
-      const summary = buildTripSummary(trips);
+      const summary = buildTripSummary(visibleTrips);
       updateTripDrawerChrome(
-        'Aaj ni trips - ' + selectedName,
-        summary.totalTrips + ' trip, ' + formatDistance(summary.totalDistanceMeters) + ' - tap karo details mate'
+        'Current trip - ' + selectedName,
+        formatDistance(summary.totalDistanceMeters) + ' - tap karo details mate'
       );
       timeline.innerHTML =
         '<div class="trip-toolbar">' +
-          '<div class="timeline-title">Aaj ni trips - ' + selectedName + '</div>' +
+          '<div class="timeline-title">Current trip - ' + selectedName + '</div>' +
           '<button onclick="showLiveMap()">Live Map</button>' +
         '</div>' +
         renderTripSummary(summary) +
-        trips.map(renderTripCard).join('');
+        visibleTrips.map(renderTripCard).join('');
 
       if (selectedTripIndex >= 0) {
-        drawTripOnMap(trips[selectedTripIndex], selectedTripIndex);
+        drawTripOnMap(visibleTrips[selectedTripIndex], selectedTripIndex);
       } else {
         selectedTripSignature = '';
         tripLayers.clearLayers();
@@ -742,7 +753,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     function buildTripSummary(trips) {
       return trips.reduce((summary, trip) => {
         const report = buildTripReport(trip.points);
-        summary.totalTrips += trip.isComplete ? 1 : 0;
+        summary.totalTrips += 1;
         summary.activeTrips += trip.isComplete ? 0 : 1;
         summary.totalDistanceMeters += report.distanceMeters;
         summary.totalTimeMs += report.totalTimeMs;
@@ -757,7 +768,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
     function renderTripSummary(summary) {
       return '<div class="timeline-item">' +
-        '<div class="timeline-time">Aaj no trip summary</div>' +
+        '<div class="timeline-time">Current trip summary</div>' +
         '<div class="report-grid">' +
           reportBox('Total trips', String(summary.totalTrips)) +
           reportBox('Active trips', String(summary.activeTrips)) +
@@ -803,6 +814,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
 
     const RETURN_CONFIRM_MS = 60 * 1000;
+    const STOP_MIN_DURATION_MS = 2 * 60 * 1000;
 
     function isInsideFactoryZone(point) {
       return distanceMeters(point, {
@@ -879,7 +891,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           movingTime += gap;
           if (stopStart && stopAnchor) {
             const duration = Number(current.locationUpdatedAt || 0) - stopStart;
-            if (duration >= 60 * 1000 && !isInsideFactoryZone(stopAnchor)) {
+            if (duration >= STOP_MIN_DURATION_MS && !isInsideFactoryZone(stopAnchor)) {
               stops.push({
                 latitude: stopAnchor.latitude,
                 longitude: stopAnchor.longitude,
@@ -896,7 +908,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const last = points[points.length - 1];
       if (stopStart && stopAnchor) {
         const duration = Number(last.locationUpdatedAt || 0) - stopStart;
-        if (duration >= 60 * 1000 && !isInsideFactoryZone(stopAnchor)) {
+        if (duration >= STOP_MIN_DURATION_MS && !isInsideFactoryZone(stopAnchor)) {
           stops.push({
             latitude: stopAnchor.latitude,
             longitude: stopAnchor.longitude,
@@ -931,6 +943,13 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       ].join(':');
     }
 
+    function roadRouteCacheKey(points, fallbackKey) {
+      if (!points.length) return fallbackKey;
+      return points
+        .map((point) => Number(point.longitude).toFixed(5) + ',' + Number(point.latitude).toFixed(5))
+        .join(';');
+    }
+
     function addTripPoint(latLng, color, title, body) {
       L.circleMarker(latLng, {
         radius: 8,
@@ -944,7 +963,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     function drawTripOnMap(trip, index) {
       if (!trip || !trip.points.length) return;
       const signature = tripSignature(trip, index);
-      setLiveLayersVisible(false);
+      setLiveLayersVisible(!trip.isComplete);
+      if (!trip.isComplete) setSelectedHistoryLineVisible(false);
       if (selectedTripSignature === signature) return;
       selectedTripSignature = signature;
       tripLayers.clearLayers();
@@ -956,7 +976,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
       const title = trip.isComplete ? 'Trip ' + (index + 1) : 'Active Trip';
       const report = buildTripReport(trip.points);
-      const routeLine = L.polyline(latLngs, {
+      const routeLine = L.polyline([], {
         color: '#1d9bf0',
         weight: 6,
         opacity: 0.9,
@@ -965,14 +985,15 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }).addTo(tripLayers).bindPopup(title + '<br>' + formatDistance(report.distanceMeters));
 
       const roadPoints = sampleRoadTrailPoints(trip.points);
-      const cachedRoute = tripRouteCache.get(signature);
+      const routeCacheKey = roadRouteCacheKey(roadPoints, signature);
+      const cachedRoute = tripRouteCache.get(routeCacheKey);
       if (cachedRoute && cachedRoute.length > 1) {
         routeLine.setLatLngs(cachedRoute);
       } else if (roadPoints.length > 1) {
         fetchRoadLatLngs(roadPoints)
           .then((roadLatLngs) => {
             if (roadLatLngs.length > 1) {
-              tripRouteCache.set(signature, roadLatLngs);
+              tripRouteCache.set(routeCacheKey, roadLatLngs);
             }
             if (selectedTripSignature === signature && roadLatLngs.length > 1) {
               routeLine.setLatLngs(roadLatLngs);

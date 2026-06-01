@@ -1,5 +1,5 @@
 const OSRM_ROUTE_BASE_URL = 'http://router.project-osrm.org/route/v1/driving/';
-const MAX_ROAD_ROUTE_POINTS = 25;
+const MAX_ROAD_ROUTE_POINTS = 35;
 
 export function normalizeRoadRouteCoordinates(input: string): string | null {
   const coordinates = input

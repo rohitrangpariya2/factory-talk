@@ -8,10 +8,12 @@ describe('road route proxy helpers', () => {
   });
 
   test('rejects invalid or too-large coordinate lists', () => {
-    const tooMany = Array.from({ length: 26 }, (_, index) => `72.${index},21.${index}`).join(';');
+    const maxAllowed = Array.from({ length: 35 }, (_, index) => `72.${index},21.${index}`).join(';');
+    const tooMany = Array.from({ length: 36 }, (_, index) => `72.${index},21.${index}`).join(';');
 
     expect(normalizeRoadRouteCoordinates('72.1,21.1')).toBeNull();
     expect(normalizeRoadRouteCoordinates('bad')).toBeNull();
+    expect(normalizeRoadRouteCoordinates(maxAllowed)).not.toBeNull();
     expect(normalizeRoadRouteCoordinates(tooMany)).toBeNull();
   });
 

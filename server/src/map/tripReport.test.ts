@@ -23,10 +23,32 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('function drawTripOnMap(trip, index)');
     expect(indexSource).toContain('function showLiveMap()');
     expect(indexSource).toContain('const tripRouteCache = new Map()');
-    expect(indexSource).toContain('Aaj ni trips');
+    expect(indexSource).toContain('Current trip');
     expect(indexSource).toContain('Map ma kholo');
     expect(indexSource).toContain("reportBox('Trip km'");
     expect(indexSource).toContain("reportBox('Stops'");
+  });
+
+  test('shows only the current active trip in the trip drawer', () => {
+    expect(indexSource).toContain('const activeTrip = trips.find((trip) => !trip.isComplete)');
+    expect(indexSource).toContain('const visibleTrips = activeTrip ? [activeTrip] : []');
+    expect(indexSource).toContain('currentTrips = visibleTrips');
+    expect(indexSource).toContain('visibleTrips.map(renderTripCard).join');
+    expect(indexSource).not.toContain('trips.map(renderTripCard).join');
+  });
+
+  test('marks holds only after two minutes away from the factory', () => {
+    expect(indexSource).toContain('const STOP_MIN_DURATION_MS = 2 * 60 * 1000');
+    expect(indexSource).toContain('duration >= STOP_MIN_DURATION_MS');
+  });
+
+  test('does not draw selected trip routes from raw GPS points', () => {
+    expect(indexSource).toContain('function roadRouteCacheKey(points, fallbackKey)');
+    expect(indexSource).toContain('function setSelectedHistoryLineVisible(visible)');
+    expect(indexSource).toContain('const routeLine = L.polyline([], {');
+    expect(indexSource).toContain('setSelectedHistoryLineVisible(false)');
+    expect(indexSource).toContain('routeLine.setLatLngs(roadLatLngs)');
+    expect(indexSource).not.toContain('const routeLine = L.polyline(latLngs, {');
   });
 
   test('does not show avg or max speed in the trip report', () => {
