@@ -93,6 +93,409 @@ app.get('/road-route', async (req, res) => {
   }
 });
 
+app.get('/delivery/:userId', (req, res) => {
+  const userId = req.params.userId || '';
+  const user = getLatestLocations().find((location) => location.userId === userId);
+  const title = user?.name ? `Delivery Tracking - ${user.name}` : 'Delivery Tracking';
+
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; style-src 'self' 'unsafe-inline' https://unpkg.com; script-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self'"
+  );
+  res.type('html').send(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; background: #0f172a; }
+    body { font: 14px system-ui, -apple-system, Segoe UI, sans-serif; }
+    .card {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      z-index: 1000;
+      background: rgba(15, 23, 42, 0.92);
+      color: #f8fafc;
+      border-radius: 10px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.28);
+      backdrop-filter: blur(10px);
+    }
+    .top-card { top: 12px; padding: 10px 12px; }
+    .top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .title { font-weight: 900; font-size: 16px; line-height: 1.2; }
+    .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .meta-grid {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+    }
+    .meta-box {
+      border-radius: 8px;
+      background: rgba(255,255,255,.06);
+      padding: 7px;
+    }
+    .meta-label { color: #cbd5e1; font-size: 11px; }
+    .meta-value { margin-top: 2px; font-weight: 800; font-size: 13px; color: #ffffff; }
+    .bottom-drawer {
+      bottom: 12px;
+      padding: 10px 12px;
+    }
+    .drawer-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .muted { color: #cbd5e1; font-size: 12px; }
+    .toolbar {
+      margin-top: 8px;
+      display: flex;
+      gap: 8px;
+    }
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    #followBtn { background: #0ea5e9; color: #fff; }
+    #centerBtn { background: rgba(148,163,184,.3); color: #e2e8f0; }
+    @media (min-width: 820px) {
+      .top-card, .bottom-drawer { right: auto; width: 430px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="card top-card">
+    <div class="top-row">
+      <div>
+        <div class="title" id="driverName">Delivery Tracking</div>
+        <div class="muted" id="lastUpdated">Waiting for location...</div>
+      </div>
+      <div class="status"><span class="dot" id="onlineDot"></span><span id="onlineText">Offline</span></div>
+    </div>
+    <div class="meta-grid">
+      <div class="meta-box"><div class="meta-label">Accuracy</div><div class="meta-value" id="accuracy">--</div></div>
+      <div class="meta-box"><div class="meta-label">Speed</div><div class="meta-value" id="speed">--</div></div>
+      <div class="meta-box"><div class="meta-label">Battery</div><div class="meta-value" id="battery">--</div></div>
+    </div>
+    <div class="toolbar">
+      <button id="followBtn" type="button">Follow live: ON</button>
+      <button id="centerBtn" type="button">Center now</button>
+    </div>
+  </div>
+
+  <div class="card bottom-drawer">
+    <div class="title">Today Trip</div>
+    <div class="drawer-grid">
+      <div class="meta-box"><div class="meta-label">Trip km</div><div class="meta-value" id="tripKm">0 m</div></div>
+      <div class="meta-box"><div class="meta-label">Start time</div><div class="meta-value" id="startTime">--</div></div>
+      <div class="meta-box"><div class="meta-label">Stops</div><div class="meta-value" id="stops">0</div></div>
+      <div class="meta-box"><div class="meta-label">Status</div><div class="meta-value" id="tripStatus">No active trip</div></div>
+    </div>
+    <div class="muted" id="tripInfo">Route line shows active delivery movement.</div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const userId = ${JSON.stringify(userId)};
+    const map = L.map('map').setView([21.1702, 72.8311], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+    ${buildFactoryZoneScript()}
+    ${buildRoadTrailScript()}
+
+    const markerLayer = L.layerGroup().addTo(map);
+    const routeLayer = L.layerGroup().addTo(map);
+    let marker = null;
+    let accuracyCircle = null;
+    let followLive = true;
+    let historyPoints = [];
+    let currentRouteSignature = '';
+
+    function distanceMeters(a, b) {
+      const earthRadiusMeters = 6371000;
+      const dLat = (Number(b.latitude) - Number(a.latitude)) * Math.PI / 180;
+      const dLon = (Number(b.longitude) - Number(a.longitude)) * Math.PI / 180;
+      const lat1 = Number(a.latitude) * Math.PI / 180;
+      const lat2 = Number(b.latitude) * Math.PI / 180;
+      const sinLat = Math.sin(dLat / 2);
+      const sinLon = Math.sin(dLon / 2);
+      const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
+      return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+
+    function formatDistance(meters) {
+      if (!Number.isFinite(Number(meters)) || Number(meters) <= 0) return '0 m';
+      if (meters < 1000) return Math.round(meters) + ' m';
+      return (meters / 1000).toFixed(2) + ' km';
+    }
+
+    function formatClock(timestamp) {
+      if (!timestamp) return '--';
+      return new Date(Number(timestamp)).toLocaleTimeString();
+    }
+
+    function formatAge(timestamp) {
+      const seconds = Math.max(0, Math.floor((Date.now() - Number(timestamp || 0)) / 1000));
+      if (seconds < 5) return 'just now';
+      if (seconds < 60) return seconds + ' sec ago';
+      return Math.floor(seconds / 60) + ' min ago';
+    }
+
+    function formatSpeedValue(location, points) {
+      const sensorSpeed = Number(location.speedKmh || 0);
+      if (sensorSpeed > 0) return Math.round(sensorSpeed) + ' km/h';
+      if (points.length < 2) return '--';
+      const prev = points[points.length - 2];
+      const next = points[points.length - 1];
+      const deltaMs = Math.max(1, Number(next.locationUpdatedAt || 0) - Number(prev.locationUpdatedAt || 0));
+      const kmh = (distanceMeters(prev, next) / 1000) / (deltaMs / 3600000);
+      return Number.isFinite(kmh) && kmh > 1 ? Math.round(kmh) + ' km/h' : '--';
+    }
+
+    function batteryText(location) {
+      const raw = location.batteryLevel ?? location.battery ?? null;
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return '--';
+      return value > 1 ? Math.round(value) + '%' : Math.round(value * 100) + '%';
+    }
+
+    function splitFactoryTrips(points) {
+      const trips = [];
+      let currentTrip = null;
+      let previousPoint = null;
+      let returnStartedAt = 0;
+      const RETURN_CONFIRM_MS = 60 * 1000;
+
+      function isInsideFactoryZone(point) {
+        return distanceMeters(point, {
+          latitude: factoryZone.latitude,
+          longitude: factoryZone.longitude
+        }) <= factoryZone.radiusMeters;
+      }
+
+      points.forEach((point) => {
+        const pointTime = Number(point.locationUpdatedAt || 0);
+        const insideFactory = isInsideFactoryZone(point);
+        if (!currentTrip && !insideFactory) {
+          const startPoint = previousPoint && isInsideFactoryZone(previousPoint) ? previousPoint : point;
+          currentTrip = {
+            points: startPoint === point ? [point] : [startPoint, point],
+            startTime: Number(startPoint.locationUpdatedAt || pointTime),
+            endTime: pointTime,
+            isComplete: false
+          };
+        } else if (currentTrip) {
+          currentTrip.points.push(point);
+          currentTrip.endTime = pointTime;
+          if (insideFactory) {
+            if (!returnStartedAt) returnStartedAt = pointTime;
+            if (pointTime - returnStartedAt >= RETURN_CONFIRM_MS) {
+              currentTrip.isComplete = true;
+              trips.push(currentTrip);
+              currentTrip = null;
+              returnStartedAt = 0;
+            }
+          } else {
+            returnStartedAt = 0;
+          }
+        }
+        previousPoint = point;
+      });
+
+      if (currentTrip) trips.push(currentTrip);
+      return trips;
+    }
+
+    function buildTripReport(points) {
+      let distance = 0;
+      const stops = [];
+      const STOP_MIN_DURATION_MS = 2 * 60 * 1000;
+      let stopStart = null;
+      let stopAnchor = null;
+
+      for (let i = 0; i < points.length - 1; i++) {
+        const current = points[i];
+        const next = points[i + 1];
+        const segmentDistance = distanceMeters(current, next);
+        if (segmentDistance < 60) {
+          if (!stopStart) {
+            stopStart = Number(current.locationUpdatedAt || 0);
+            stopAnchor = current;
+          }
+        } else {
+          distance += segmentDistance;
+          if (stopStart && stopAnchor) {
+            const duration = Number(current.locationUpdatedAt || 0) - stopStart;
+            if (duration >= STOP_MIN_DURATION_MS) stops.push(stopAnchor);
+          }
+          stopStart = null;
+          stopAnchor = null;
+        }
+      }
+
+      return {
+        distanceMeters: distance,
+        stopsCount: stops.length
+      };
+    }
+
+    function activeRoutePoints(points) {
+      const trips = splitFactoryTrips(points);
+      const activeTrip = trips.find((trip) => !trip.isComplete);
+      if (!activeTrip) return [];
+      return activeTrip.points
+        .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
+        .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+    }
+
+    function updateRoute(points) {
+      const routePoints = activeRoutePoints(points);
+      routeLayer.clearLayers();
+      if (routePoints.length < 2) return;
+      const signature = routePoints
+        .slice(-20)
+        .map((point) => Math.round(point.latitude * 10000) + ':' + Math.round(point.longitude * 10000))
+        .join('|');
+      if (signature === currentRouteSignature) return;
+      currentRouteSignature = signature;
+
+      const rawLatLngs = routePoints.map((point) => [point.latitude, point.longitude]);
+      const routeLine = L.polyline([], {
+        color: '#0ea5e9',
+        weight: 6,
+        opacity: 0.95,
+        lineCap: 'round',
+        lineJoin: 'round'
+      }).addTo(routeLayer);
+
+      const roadPoints = sampleRoadTrailPoints(routePoints);
+      if (roadPoints.length > 1) {
+        fetchRoadLatLngs(roadPoints)
+          .then((roadLatLngs) => {
+            if (roadLatLngs.length > 1 && signature === currentRouteSignature) {
+              routeLine.setLatLngs(roadLatLngs);
+              return;
+            }
+            if (signature === currentRouteSignature) routeLine.setLatLngs(rawLatLngs);
+          })
+          .catch(() => {
+            if (signature === currentRouteSignature) routeLine.setLatLngs(rawLatLngs);
+          });
+      } else {
+        routeLine.setLatLngs(rawLatLngs);
+      }
+    }
+
+    function renderTopCard(location) {
+      const freshnessMs = Date.now() - Number(location.receivedAt || location.locationUpdatedAt || 0);
+      const online = freshnessMs <= 120000;
+      document.getElementById('driverName').textContent = location.name || 'Delivery boy';
+      document.getElementById('onlineText').textContent = online ? 'Online' : 'Offline';
+      document.getElementById('onlineDot').style.background = online ? '#22c55e' : '#94a3b8';
+      document.getElementById('lastUpdated').textContent = 'Last updated ' + formatAge(location.locationUpdatedAt);
+      document.getElementById('accuracy').textContent = location.accuracy ? Math.round(location.accuracy) + ' m' : '--';
+      document.getElementById('speed').textContent = formatSpeedValue(location, historyPoints);
+      document.getElementById('battery').textContent = batteryText(location);
+    }
+
+    function renderBottomDrawer(points) {
+      const trips = splitFactoryTrips(points);
+      const activeTrip = trips.find((trip) => !trip.isComplete);
+      if (!activeTrip) {
+        document.getElementById('tripKm').textContent = '0 m';
+        document.getElementById('startTime').textContent = '--';
+        document.getElementById('stops').textContent = '0';
+        document.getElementById('tripStatus').textContent = 'No active trip';
+        return;
+      }
+      const report = buildTripReport(activeTrip.points);
+      document.getElementById('tripKm').textContent = formatDistance(report.distanceMeters);
+      document.getElementById('startTime').textContent = formatClock(activeTrip.startTime);
+      document.getElementById('stops').textContent = String(report.stopsCount);
+      document.getElementById('tripStatus').textContent = 'Active delivery';
+    }
+
+    function renderMarker(location) {
+      const latLng = [location.latitude, location.longitude];
+      markerLayer.clearLayers();
+      marker = L.marker(latLng).addTo(markerLayer);
+      if (location.accuracy && Number(location.accuracy) > 0 && Number(location.accuracy) < 5000) {
+        accuracyCircle = L.circle(latLng, {
+          radius: Number(location.accuracy),
+          color: '#38bdf8',
+          weight: 1,
+          fillColor: '#38bdf8',
+          fillOpacity: 0.12
+        }).addTo(markerLayer);
+      }
+      if (followLive) {
+        map.setView(latLng, Math.max(map.getZoom(), 16), { animate: true });
+      }
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch('/locations', { cache: 'no-store' });
+        const historyResponse = await fetch('/locations/history?userId=' + encodeURIComponent(userId), { cache: 'no-store' });
+        const data = await response.json();
+        const historyData = await historyResponse.json();
+        const location = (data.locations || []).find((item) => item.userId === userId);
+        historyPoints = (historyData.history || [])
+          .filter((point) => point.userId === userId)
+          .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
+          .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+
+        if (!location) {
+          document.getElementById('onlineText').textContent = 'Offline';
+          document.getElementById('onlineDot').style.background = '#94a3b8';
+          return;
+        }
+
+        renderTopCard(location);
+        renderBottomDrawer(historyPoints);
+        renderMarker(location);
+        updateRoute(historyPoints);
+      } catch (error) {
+        document.getElementById('onlineText').textContent = 'Offline';
+        document.getElementById('onlineDot').style.background = '#ef4444';
+      }
+    }
+
+    document.getElementById('followBtn').addEventListener('click', () => {
+      followLive = !followLive;
+      document.getElementById('followBtn').textContent = 'Follow live: ' + (followLive ? 'ON' : 'OFF');
+      if (followLive && marker) {
+        map.setView(marker.getLatLng(), Math.max(map.getZoom(), 16), { animate: true });
+      }
+    });
+
+    document.getElementById('centerBtn').addEventListener('click', () => {
+      if (marker) map.setView(marker.getLatLng(), Math.max(map.getZoom(), 16), { animate: true });
+    });
+
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>`);
+});
+
 app.get(['/map', '/map/:userId'], (req, res) => {
   const userId = req.params.userId || '';
   const user = getLatestLocations().find((location) => location.userId === userId);
