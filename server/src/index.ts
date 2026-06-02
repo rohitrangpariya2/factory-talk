@@ -12,7 +12,7 @@ import { buildFactoryZoneScript } from './map/factoryZone';
 import { buildOsrmRouteUrl, normalizeRoadRouteCoordinates } from './map/roadRoute';
 import { buildRoadTrailScript } from './map/roadTrail';
 import { buildStopMarkersScript } from './map/stopMarkers';
-import { getSavedLocationHistory } from './services/locationHistoryService';
+import { getSavedLocationHistory, scheduleLocationHistoryCleanup } from './services/locationHistoryService';
 import { getLatestLocations, getLocationHistory, setupSocketHandler } from './signaling/socketHandler';
 
 const app = express();
@@ -1876,6 +1876,8 @@ server.listen(env.port, () => {
   if (env.turnServer) {
     console.log(`TURN Server: ${env.turnServer}`);
   }
+  // Clean up yesterday's location history on startup, then daily at midnight
+  scheduleLocationHistoryCleanup();
 });
 
 // Test assertions compatibility block:

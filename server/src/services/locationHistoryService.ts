@@ -44,10 +44,15 @@ export async function persistLocationHistory(location: PersistableLocation): Pro
 
 export async function getSavedLocationHistory(userId: string, limit = 300): Promise<PersistedLocation[]> {
   const cleanLimit = Math.max(1, Math.min(limit, 500));
+
+  // Only fetch today's points (from midnight onwards)
+  const todayMidnightMs = getTodayMidnightMs();
+
   const snapshot = await db
     .collection('locationHistory')
     .doc(userId)
     .collection('points')
+    .where('locationUpdatedAt', '>=', todayMidnightMs)
     .orderBy('locationUpdatedAt', 'desc')
     .limit(cleanLimit)
     .get();
@@ -55,6 +60,74 @@ export async function getSavedLocationHistory(userId: string, limit = 300): Prom
   return snapshot.docs
     .map((doc) => doc.data() as PersistedLocation)
     .reverse();
+}
+
+/**
+ * Deletes all persisted location history older than today's local midnight.
+ * Uses Firestore collectionGroup to scan all users' points in one query.
+ * Runs in batches of 400 to stay under Firestore's 500-write-per-batch limit.
+ */
+export async function cleanupOldLocationHistory(): Promise<void> {
+  const todayMidnightMs = getTodayMidnightMs();
+  console.log(`[LocationCleanup] Deleting history older than ${new Date(todayMidnightMs).toISOString()} ...`);
+
+  try {
+    let totalDeleted = 0;
+
+    // Keep deleting in pages until none remain
+    while (true) {
+      const snapshot = await db
+        .collectionGroup('points')
+        .where('locationUpdatedAt', '<', todayMidnightMs)
+        .limit(400)
+        .get();
+
+      if (snapshot.empty) break;
+
+      const batch = db.batch();
+      snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+
+      totalDeleted += snapshot.docs.length;
+      console.log(`[LocationCleanup] Deleted ${snapshot.docs.length} old points (total: ${totalDeleted})`);
+
+      if (snapshot.docs.length < 400) break;
+    }
+
+    console.log(`[LocationCleanup] Done. Total deleted: ${totalDeleted} old location points.`);
+  } catch (error) {
+    console.error('[LocationCleanup] Failed to clean up old history:', error);
+  }
+}
+
+/**
+ * Schedules a daily automatic cleanup at midnight every day.
+ * Also fires once immediately on server startup to clear any leftover old data.
+ */
+export function scheduleLocationHistoryCleanup(): void {
+  // Run once on startup
+  cleanupOldLocationHistory().catch((err) =>
+    console.error('[LocationCleanup] Startup cleanup error:', err)
+  );
+
+  // Schedule nightly at midnight
+  function scheduleNextMidnight() {
+    const msUntilMidnight = getTodayMidnightMs() + 24 * 60 * 60 * 1000 - Date.now();
+    setTimeout(() => {
+      cleanupOldLocationHistory().catch((err) =>
+        console.error('[LocationCleanup] Midnight cleanup error:', err)
+      );
+      scheduleNextMidnight();
+    }, msUntilMidnight);
+    console.log(`[LocationCleanup] Next cleanup in ${Math.round(msUntilMidnight / 3600000)} hr.`);
+  }
+
+  scheduleNextMidnight();
+}
+
+function getTodayMidnightMs(): number {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
 }
 
 function shouldPersistLocation(previous: PersistableLocation, next: PersistableLocation): boolean {
