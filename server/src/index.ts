@@ -536,60 +536,95 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
     .vehicle-pulse {
       position: absolute;
-      left: 22px;
-      top: 22px;
+      left: 23px;
+      top: 21px;
       width: 28px;
       height: 28px;
       border-radius: 50%;
-      background: rgba(34, 197, 94, .28);
+      background: var(--vehicle-glow);
       border: 2px solid rgba(255,255,255,.85);
       animation: livePulse 1.7s ease-out infinite;
     }
     .vehicle-body {
       position: absolute;
-      left: 16px;
-      top: 8px;
-      width: 40px;
+      left: 13px;
+      top: 9px;
+      width: 46px;
       height: 42px;
-      border-radius: 18px 18px 12px 12px;
-      background: linear-gradient(180deg, #ffffff 0 13%, var(--vehicle-color) 13% 100%);
-      border: 3px solid #ffffff;
-      box-shadow: 0 8px 24px rgba(0,0,0,.45), 0 0 0 3px rgba(15,23,42,.85);
-      display: grid;
-      place-items: center;
-      color: #ffffff;
       transform-origin: 50% 50%;
       transition: transform .35s ease-out;
+      filter: drop-shadow(0 8px 14px rgba(0,0,0,.48));
     }
     .vehicle-arrow {
       content: '';
       position: absolute;
-      top: -12px;
+      top: -10px;
       left: 50%;
       transform: translateX(-50%);
-      border-left: 12px solid transparent;
-      border-right: 12px solid transparent;
-      border-bottom: 15px solid #ffffff;
-      filter: drop-shadow(0 -1px 1px rgba(15,23,42,.35));
+      border-left: 9px solid transparent;
+      border-right: 9px solid transparent;
+      border-bottom: 14px solid #ffffff;
+      filter: drop-shadow(0 -1px 1px rgba(15,23,42,.45));
     }
     .vehicle-cabin {
       position: absolute;
-      top: 7px;
-      left: 10px;
-      width: 20px;
-      height: 12px;
-      border-radius: 7px 7px 4px 4px;
-      background: rgba(15,23,42,.72);
-      border: 1px solid rgba(255,255,255,.85);
+      top: 11px;
+      left: 17px;
+      width: 15px;
+      height: 15px;
+      border-radius: 50% 50% 44% 44%;
+      background: #ffffff;
+      border: 2px solid #0f172a;
+      box-shadow: 0 0 0 2px var(--vehicle-accent);
     }
     .vehicle-tail {
       position: absolute;
-      bottom: 6px;
-      left: 9px;
-      right: 9px;
-      height: 6px;
+      left: 11px;
+      top: 25px;
+      width: 30px;
+      height: 8px;
       border-radius: 999px;
-      background: rgba(255,255,255,.86);
+      background: var(--vehicle-color);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 2px rgba(15,23,42,.9);
+    }
+    .vehicle-handlebar {
+      position: absolute;
+      right: 4px;
+      top: 17px;
+      width: 14px;
+      height: 4px;
+      border-radius: 999px;
+      background: #ffffff;
+      box-shadow: 0 0 0 2px rgba(15,23,42,.85);
+      transform: rotate(-20deg);
+    }
+    .vehicle-cargo {
+      position: absolute;
+      left: 3px;
+      top: 16px;
+      width: 15px;
+      height: 13px;
+      border-radius: 4px;
+      background: var(--vehicle-accent);
+      border: 2px solid #ffffff;
+      box-shadow: 0 0 0 2px rgba(15,23,42,.85);
+    }
+    .vehicle-wheel {
+      position: absolute;
+      top: 31px;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #0f172a;
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 2px rgba(15,23,42,.85);
+    }
+    .vehicle-wheel.back {
+      left: 7px;
+    }
+    .vehicle-wheel.front {
+      right: 5px;
     }
     .vehicle-body.hidden-bearing .vehicle-arrow {
       display: none;
@@ -1361,8 +1396,25 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return smoothed;
     }
 
+    function markerVisualState(location, status) {
+      const live = deliveryLiveStatus(location, lastHistoryPoints);
+      if (live.className === 'offline') {
+        return { color: '#64748b', accent: '#ef4444', glow: 'rgba(239, 68, 68, .24)' };
+      }
+      if (live.className === 'stale') {
+        return { color: '#94a3b8', accent: '#ef4444', glow: 'rgba(239, 68, 68, .22)' };
+      }
+      if (live.className === 'stopped') {
+        return { color: '#f59e0b', accent: '#f97316', glow: 'rgba(245, 158, 11, .28)' };
+      }
+      if (live.className === 'moving') {
+        return { color: '#0ea5e9', accent: '#22c55e', glow: 'rgba(34, 197, 94, .28)' };
+      }
+      return { color: status.color, accent: '#38bdf8', glow: 'rgba(56, 189, 248, .22)' };
+    }
+
     function makeIcon(location, status) {
-      const color = status.color;
+      const visual = markerVisualState(location, status);
       const name = escapeText(location.name || 'Driver');
       const bearing = Number(location.displayBearing);
       const hasBearing = Number.isFinite(bearing);
@@ -1373,12 +1425,16 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         iconSize: [72, 64],
         iconAnchor: [36, 56],
         popupAnchor: [0, -58],
-        html: '<div class="vehicle-marker" style="--vehicle-color:' + color + '">' +
+        html: '<div class="vehicle-marker" style="--vehicle-color:' + visual.color + ';--vehicle-accent:' + visual.accent + ';--vehicle-glow:' + visual.glow + '">' +
           '<div class="vehicle-pulse"></div>' +
           '<div class="' + bodyClass + '" style="' + rotationStyle + '">' +
             '<span class="vehicle-arrow"></span>' +
+            '<span class="vehicle-cargo"></span>' +
             '<span class="vehicle-cabin"></span>' +
             '<span class="vehicle-tail"></span>' +
+            '<span class="vehicle-handlebar"></span>' +
+            '<span class="vehicle-wheel back"></span>' +
+            '<span class="vehicle-wheel front"></span>' +
           '</div>' +
           '<div class="driver-label">' + name + '</div>' +
         '</div>'

@@ -28,6 +28,20 @@ describe('live tracking map presentation', () => {
     expect(indexSource).toContain('vehicle-tail');
   });
 
+  test('uses a delivery scooter marker body with high contrast state colors', () => {
+    expect(indexSource).toContain('function markerVisualState');
+    expect(indexSource).toContain('vehicle-cargo');
+    expect(indexSource).toContain('vehicle-handlebar');
+    expect(indexSource).toContain('vehicle-wheel back');
+    expect(indexSource).toContain('vehicle-wheel front');
+    expect(indexSource).toContain('--vehicle-accent');
+    expect(indexSource).toContain('--vehicle-glow');
+    expect(indexSource).toContain("live.className === 'moving'");
+    expect(indexSource).toContain("live.className === 'stopped'");
+    expect(indexSource).toContain("live.className === 'stale'");
+    expect(indexSource).toContain("live.className === 'offline'");
+  });
+
   test('adds follow live controls with manual map pause and resume', () => {
     expect(indexSource).toContain('id="followLiveButton"');
     expect(indexSource).toContain('function setFollowLive');
