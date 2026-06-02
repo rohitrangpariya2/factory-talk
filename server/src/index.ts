@@ -389,6 +389,90 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       .trip-drawer { max-height: min(62vh, 620px); }
       .trip-drawer-content { max-height: calc(min(62vh, 620px) - 72px); }
     }
+    .playback-panel {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      background: rgba(15, 18, 25, 0.94);
+      color: white;
+      border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.35);
+      backdrop-filter: blur(10px);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 90%;
+      max-width: 480px;
+      border: 1px solid rgba(255,255,255,0.08);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+    .playback-panel.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .playback-btn {
+      background: #1d9bf0;
+      border: 0;
+      color: white;
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 16px;
+      transition: background 0.15s ease;
+    }
+    .playback-btn:hover {
+      background: #1a8cd8;
+    }
+    .playback-slider {
+      flex: 1;
+      height: 6px;
+      border-radius: 3px;
+      outline: none;
+      accent-color: #1d9bf0;
+      cursor: pointer;
+    }
+    .playback-speed {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: white;
+      border-radius: 16px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s ease;
+    }
+    .playback-speed:hover {
+      background: rgba(255,255,255,0.16);
+    }
+    .playback-meta {
+      font-size: 11px;
+      color: #c7ccd8;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.3;
+      min-width: 90px;
+    }
+    .playback-time {
+      font-weight: 800;
+      color: white;
+    }
+    @media (max-width: 719px) {
+      .playback-panel {
+        bottom: 112px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -413,6 +497,15 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       <div id="userList"></div>
       <div id="timeline" class="timeline"></div>
     </div>
+  </div>
+  <div id="playbackPanel" class="playback-panel">
+    <button type="button" class="playback-btn" id="playbackPlayBtn" onclick="togglePlaybackPlay()">▶</button>
+    <div class="playback-meta">
+      <span class="playback-time" id="playbackTimeText">00:00:00</span>
+      <span id="playbackSpeedText">0 km/h</span>
+    </div>
+    <input type="range" class="playback-slider" id="playbackRange" min="0" max="100" value="0" oninput="scrubPlayback(this.value)">
+    <button type="button" class="playback-speed" id="playbackSpeedBtn" onclick="togglePlaybackSpeed()">1x</button>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
@@ -1170,12 +1263,157 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }
     }
 
+    let isPlaybackPlaying = false;
+    let playbackIndex = 0;
+    let playbackSpeed = 1; // 1, 2, 5, 10
+    let playbackPoints = [];
+    let playbackTimer = null;
+    let playbackMarker = null;
+
+    function startPlayback(trip) {
+      stopPlayback();
+      if (!trip || !trip.points || trip.points.length < 2) return;
+      playbackPoints = simplifyPoints(trip.points);
+      if (playbackPoints.length < 2) return;
+
+      playbackIndex = 0;
+      
+      const first = playbackPoints[0];
+      const startIcon = L.divIcon({
+        className: '',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+        html: '<div style="width:16px;height:16px;border-radius:50%;background:#22c55e;border:2px solid white;box-shadow:0 0 10px rgba(0,0,0,0.5);position:relative;"><div style="width:8px;height:8px;border-radius:50%;background:white;position:absolute;top:4px;left:4px;animation:pulse 1.5s infinite;"></div></div>'
+      });
+
+      playbackMarker = L.marker([first.latitude, first.longitude], { icon: startIcon }).addTo(map);
+      
+      const panel = document.getElementById('playbackPanel');
+      if (panel) panel.classList.add('visible');
+
+      updatePlaybackUI();
+      playPlayback();
+    }
+
+    function stopPlayback() {
+      pausePlayback();
+      playbackPoints = [];
+      playbackIndex = 0;
+      if (playbackMarker) {
+        map.removeLayer(playbackMarker);
+        playbackMarker = null;
+      }
+      const panel = document.getElementById('playbackPanel');
+      if (panel) panel.classList.remove('visible');
+    }
+
+    function playPlayback() {
+      if (isPlaybackPlaying) return;
+      isPlaybackPlaying = true;
+      const btn = document.getElementById('playbackPlayBtn');
+      if (btn) btn.textContent = '❚❚';
+      
+      const baseIntervalMs = 400; // time per point step
+      const stepIntervalMs = Math.max(40, Math.round(baseIntervalMs / playbackSpeed));
+      
+      playbackTimer = setInterval(tickPlayback, stepIntervalMs);
+    }
+
+    function pausePlayback() {
+      isPlaybackPlaying = false;
+      const btn = document.getElementById('playbackPlayBtn');
+      if (btn) btn.textContent = '▶';
+      if (playbackTimer) {
+        clearInterval(playbackTimer);
+        playbackTimer = null;
+      }
+    }
+
+    function togglePlaybackPlay() {
+      if (isPlaybackPlaying) {
+        pausePlayback();
+      } else {
+        if (playbackIndex >= playbackPoints.length - 1) {
+          playbackIndex = 0;
+        }
+        playPlayback();
+      }
+    }
+
+    function togglePlaybackSpeed() {
+      const speeds = [1, 2, 5, 10];
+      const currentIdx = speeds.indexOf(playbackSpeed);
+      playbackSpeed = speeds[(currentIdx + 1) % speeds.length];
+      
+      const btn = document.getElementById('playbackSpeedBtn');
+      if (btn) btn.textContent = playbackSpeed + 'x';
+      
+      if (isPlaybackPlaying) {
+        pausePlayback();
+        playPlayback();
+      }
+    }
+
+    function tickPlayback() {
+      if (playbackIndex >= playbackPoints.length - 1) {
+        pausePlayback();
+        return;
+      }
+      playbackIndex += 1;
+      updatePlaybackUI();
+    }
+
+    function scrubPlayback(val) {
+      if (!playbackPoints.length) return;
+      const pct = Number(val) / 100;
+      playbackIndex = Math.min(
+        playbackPoints.length - 1,
+        Math.max(0, Math.round(pct * (playbackPoints.length - 1)))
+      );
+      updatePlaybackUI();
+    }
+
+    function updatePlaybackUI() {
+      if (!playbackPoints.length || playbackIndex < 0 || playbackIndex >= playbackPoints.length) return;
+      const point = playbackPoints[playbackIndex];
+      const latLng = [point.latitude, point.longitude];
+      
+      if (playbackMarker) {
+        playbackMarker.setLatLng(latLng);
+      }
+      
+      let currentSpeed = 0;
+      if (playbackIndex > 0) {
+        const prev = playbackPoints[playbackIndex - 1];
+        const gapMs = Math.abs(Number(point.locationUpdatedAt || 0) - Number(prev.locationUpdatedAt || 0));
+        const distance = distanceMeters(prev, point);
+        currentSpeed = speedKmh(distance, gapMs);
+      }
+      
+      const timeText = document.getElementById('playbackTimeText');
+      if (timeText) timeText.textContent = formatClock(point.locationUpdatedAt).split(', ')[1] || formatClock(point.locationUpdatedAt);
+      
+      const speedText = document.getElementById('playbackSpeedText');
+      if (speedText) speedText.textContent = formatSpeed(currentSpeed);
+      
+      const slider = document.getElementById('playbackRange');
+      if (slider) {
+        const pct = (playbackIndex / (playbackPoints.length - 1)) * 100;
+        slider.value = pct;
+      }
+      
+      map.panTo(latLng);
+    }
+
     function openTripOnMap(index) {
       forceLiveMapMode = false;
       selectedTripIndex = index;
       selectedTripSignature = '';
       shouldAutoFitTripBounds = true;
       renderTripReport(lastHistoryPoints);
+      if (currentTrips && currentTrips[index]) {
+        startPlayback(currentTrips[index]);
+      }
     }
 
     function showLiveMap() {
@@ -1186,10 +1424,14 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       tripLayers.clearLayers();
       setLiveLayersVisible(true);
       renderTripReport(lastHistoryPoints);
+      stopPlayback();
     }
 
     window.openTripOnMap = openTripOnMap;
     window.showLiveMap = showLiveMap;
+    window.togglePlaybackPlay = togglePlaybackPlay;
+    window.togglePlaybackSpeed = togglePlaybackSpeed;
+    window.scrubPlayback = scrubPlayback;
 
     window.focusUser = function(id) {
       forceLiveMapMode = false;
@@ -1204,13 +1446,15 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         map.setView(marker.getLatLng(), 17, { animate: true });
         marker.openPopup();
       }
-      refresh();
+      stopPlayback();
+      loadSavedHistory(id).finally(refresh);
     };
 
-    async function loadSavedHistory() {
-      if (!userId) return;
+    async function loadSavedHistory(targetId) {
+      const id = targetId || userId;
+      if (!id) return;
       try {
-        const response = await fetch('/locations/history/saved?userId=' + encodeURIComponent(userId) + '&limit=300', { cache: 'no-store' });
+        const response = await fetch('/locations/history/saved?userId=' + encodeURIComponent(id) + '&limit=300', { cache: 'no-store' });
         const data = await response.json();
         savedHistory = Array.isArray(data.history) ? data.history : [];
       } catch (error) {
@@ -1221,7 +1465,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     async function refresh() {
       try {
         const response = await fetch('/locations', { cache: 'no-store' });
-        const historyResponse = await fetch('/locations/history' + (userId ? '?userId=' + encodeURIComponent(userId) : ''), { cache: 'no-store' });
+        const queryId = selectedTimelineUserId || userId;
+        const historyResponse = await fetch('/locations/history' + (queryId ? '?userId=' + encodeURIComponent(queryId) : ''), { cache: 'no-store' });
         const data = await response.json();
         const historyData = await historyResponse.json();
         const liveLocations = (data.locations || [])
