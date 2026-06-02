@@ -17,7 +17,7 @@ type PersistableLocation = {
   isCallActive?: boolean;
 };
 
-type PersistedLocation = PersistableLocation & {
+export type PersistedLocation = PersistableLocation & {
   createdAt: number;
 };
 
@@ -62,6 +62,27 @@ export async function getSavedLocationHistory(userId: string, limit = 300): Prom
   return snapshot.docs
     .map((doc) => doc.data() as PersistedLocation)
     .reverse();
+}
+
+export async function getSavedLocationHistoryForRange(
+  userId: string,
+  startMs: number,
+  endMs: number,
+  limit = 2000
+): Promise<PersistedLocation[]> {
+  const cleanLimit = Math.max(1, Math.min(limit, 5000));
+
+  const snapshot = await db
+    .collection('locationHistory')
+    .doc(userId)
+    .collection('points')
+    .where('locationUpdatedAt', '>=', startMs)
+    .where('locationUpdatedAt', '<', endMs)
+    .orderBy('locationUpdatedAt', 'asc')
+    .limit(cleanLimit)
+    .get();
+
+  return snapshot.docs.map((doc) => doc.data() as PersistedLocation);
 }
 
 /**

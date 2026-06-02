@@ -12,7 +12,9 @@ import { buildFactoryZoneScript } from './map/factoryZone';
 import { buildOsrmRouteUrl, normalizeRoadRouteCoordinates } from './map/roadRoute';
 import { buildRoadTrailScript } from './map/roadTrail';
 import { buildStopMarkersScript } from './map/stopMarkers';
-import { getSavedLocationHistory, scheduleLocationHistoryCleanup } from './services/locationHistoryService';
+import { buildDeliveryHistoryDashboardHtml } from './deliveryHistory/dashboard';
+import { buildDeliveryHistoryReport, deliveryHistoryReportToCsv, parseDeliveryHistoryDateRange } from './deliveryHistory/report';
+import { getSavedLocationHistory, getSavedLocationHistoryForRange, scheduleLocationHistoryCleanup } from './services/locationHistoryService';
 import { getLatestLocations, getLocationHistory, setupSocketHandler } from './signaling/socketHandler';
 
 const app = express();
@@ -114,6 +116,69 @@ app.get('/road-route', async (req, res) => {
   } catch (error) {
     console.error('Failed to fetch road route:', error);
     res.status(502).json({ code: 'RouteProxyFailed' });
+  }
+});
+
+app.get('/delivery-history', (_req, res) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; style-src 'self' 'unsafe-inline' https://unpkg.com; script-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self'"
+  );
+  res.type('html').send(buildDeliveryHistoryDashboardHtml());
+});
+
+app.get('/delivery-history/report', async (req, res) => {
+  try {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+    const date = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+    if (!date) {
+      res.status(400).json({ error: 'date is required' });
+      return;
+    }
+
+    const range = parseDeliveryHistoryDateRange(date);
+    const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
+    const report = buildDeliveryHistoryReport(history, range.date);
+    res.status(200).json({
+      report,
+      warning: 'Old reports may be unavailable if location history was cleaned.'
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to build delivery history report';
+    const status = message.includes('date') ? 400 : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get('/delivery-history/export', async (req, res) => {
+  try {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+    const date = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+    if (!date) {
+      res.status(400).json({ error: 'date is required' });
+      return;
+    }
+
+    const range = parseDeliveryHistoryDateRange(date);
+    const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
+    const report = buildDeliveryHistoryReport(history, range.date);
+    const csv = deliveryHistoryReportToCsv(report);
+    const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="delivery-history-${safeUserId}-${range.date}.csv"`);
+    res.status(200).send(csv);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to export delivery history report';
+    const status = message.includes('date') ? 400 : 500;
+    res.status(status).json({ error: message });
   }
 });
 
