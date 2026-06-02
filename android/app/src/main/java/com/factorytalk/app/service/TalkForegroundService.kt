@@ -356,6 +356,9 @@ class TalkForegroundService : Service() {
         val now = System.currentTimeMillis()
         val batteryLevel = getBatteryLevel()
         val isFreshLocation = !isLocationStale(location, Constants.LOCATION_FIX_STALE_MS)
+        // Convert Location.speed (m/s) to km/h; only report if GPS provides it
+        val speedKmhValue: Float? = if (location.hasSpeed() && location.speed >= 0f) location.speed * 3.6f else null
+        val isCallActiveValue: Boolean = lastCallBusyStatus
         if (!isFreshLocation) {
             if (
                 !allowStaleHeartbeat ||
@@ -371,7 +374,9 @@ class TalkForegroundService : Service() {
                 location.latitude,
                 location.longitude,
                 location.accuracy,
-                batteryLevel = batteryLevel
+                batteryLevel = batteryLevel,
+                speedKmh = speedKmhValue,
+                isCallActive = isCallActiveValue
             )
             lastStaleLocationHeartbeatAt = now
             saveLocationSent(location, "Last location heartbeat sent")
@@ -383,7 +388,9 @@ class TalkForegroundService : Service() {
             location.longitude,
             location.accuracy,
             location.time,
-            batteryLevel
+            batteryLevel,
+            speedKmh = speedKmhValue,
+            isCallActive = isCallActiveValue
         )
         hasSentFreshLocation = true
         saveLocationSent(location, "Location sent")
