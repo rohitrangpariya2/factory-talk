@@ -1571,7 +1571,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           }
         });
       });
-    }
+
+      const last = trip.points[trip.points.length - 1];
       addTripPoint(
         [last.latitude, last.longitude],
         trip.isComplete ? '#0ea5e9' : '#f59e0b',
