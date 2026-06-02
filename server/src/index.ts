@@ -390,9 +390,6 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     .status { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; }
     .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .user {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 8px;
       padding: 10px;
       border-radius: 8px;
       background: rgba(255,255,255,.06);
@@ -755,45 +752,117 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       color: #bbf7d0;
     }
 
-    @keyframes blink {
-      0% { opacity: 1; }
-      50% { opacity: 0.3; }
-      100% { opacity: 1; }
+    .delivery-status-card {
+      min-width: 260px;
+      color: #f8fafc;
     }
-    .call-blink {
-      animation: blink 1.2s infinite;
-      font-weight: bold;
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid rgba(245, 158, 11, 0.3);
-      color: #fbbf24;
-      padding: 2px 6px;
-      border-radius: 4px;
+    .delivery-status-card.compact {
+      min-width: 0;
+      width: 100%;
+    }
+    .delivery-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .delivery-card-name {
+      font-size: 15px;
+      line-height: 1.2;
+      font-weight: 900;
+      color: #ffffff;
+    }
+    .delivery-card-updated {
+      color: #cbd5e1;
+      font-size: 12px;
+      margin-top: 3px;
+    }
+    .delivery-status-chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .delivery-chip {
+      border-radius: 999px;
+      padding: 4px 8px;
       font-size: 11px;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
+      font-weight: 900;
+      white-space: nowrap;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(148,163,184,.14);
+      color: #e2e8f0;
     }
-    .motion-badge {
-      background: rgba(29, 155, 240, 0.15);
-      border: 1px solid rgba(29, 155, 240, 0.3);
-      color: #7dd3fc;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 11px;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-weight: bold;
+    .delivery-chip.moving,
+    .delivery-chip.outside {
+      background: rgba(34,197,94,.14);
+      border-color: rgba(34,197,94,.35);
+      color: #bbf7d0;
     }
-    .motion-badge.motion-stationary {
-      background: rgba(148, 163, 184, 0.15);
-      border: 1px solid rgba(148, 163, 184, 0.3);
+    .delivery-chip.stopped,
+    .delivery-chip.inside {
+      background: rgba(14,165,233,.14);
+      border-color: rgba(14,165,233,.35);
+      color: #bae6fd;
+    }
+    .delivery-chip.stale {
+      background: rgba(245,158,11,.15);
+      border-color: rgba(245,158,11,.36);
+      color: #fde68a;
+    }
+    .delivery-chip.offline {
+      background: rgba(148,163,184,.14);
+      border-color: rgba(148,163,184,.28);
       color: #cbd5e1;
     }
-    .motion-badge.motion-walking {
-      background: rgba(16, 185, 129, 0.15);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      color: #a7f3d0;
+    .delivery-card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px;
+      margin-top: 8px;
+    }
+    .delivery-card-metric {
+      border-radius: 8px;
+      background: rgba(255,255,255,.055);
+      padding: 8px;
+      min-width: 0;
+    }
+    .delivery-card-label {
+      color: #c7ccd8;
+      font-size: 11px;
+      line-height: 1.2;
+    }
+    .delivery-card-value {
+      color: #ffffff;
+      font-weight: 900;
+      font-size: 13px;
+      line-height: 1.25;
+      margin-top: 3px;
+      overflow-wrap: anywhere;
+    }
+    .delivery-card-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    .delivery-card-actions button,
+    .delivery-card-actions a {
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 10px;
+      color: white;
+      background: #1d9bf0;
+      text-decoration: none;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+    .delivery-card-actions a {
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.16);
     }
   </style>
 </head>
@@ -975,23 +1044,103 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return points.every((point) => distanceMeters(earliest, point) < MOTION_MEANINGFUL_MOVE_METERS);
     }
 
-    function motionLabel(status) {
-      if (!status || status.state === 'unknown') return 'Live GPS';
-      if (status.state === 'gps_stale') return 'GPS stale';
-      if (status.state === 'stationary') return 'Stationary';
-      const speed = Number(status.speedKmh);
-      if (Number.isFinite(speed) && speed >= 15) return Math.round(speed) + ' km/h (Driving)';
-      if (Number.isFinite(speed) && speed > 0) return Math.round(speed) + ' km/h (Moving)';
-      return 'Moving';
+    function deliveryLiveStatus(location, historyPoints) {
+      if (location.isOnline === false) return { label: 'Offline', className: 'offline' };
+      const motion = motionStatusFor(location, historyPoints);
+      if (motion.state === 'gps_stale') return { label: 'GPS stale', className: 'stale' };
+      if (motion.state === 'moving') return { label: 'Moving', className: 'moving' };
+      if (motion.state === 'stationary') return { label: 'Stopped', className: 'stopped' };
+      return { label: 'Live GPS', className: 'stopped' };
     }
 
-    function motionBadgeHtml(location, historyPoints) {
-      const motion = motionStatusFor(location, historyPoints);
-      const label = motionLabel(motion);
-      if (motion.state === 'gps_stale') return '<span class="motion-badge motion-stationary">GPS stale</span>';
-      if (motion.state === 'stationary') return '<span class="motion-badge motion-stationary">Stationary</span>';
-      if (motion.state === 'moving') return '<span class="motion-badge' + (Number(motion.speedKmh) > 0 && Number(motion.speedKmh) < 15 ? ' motion-walking' : '') + '">' + label + '</span>';
-      return '<span class="motion-badge motion-walking">Live GPS</span>';
+    function factoryStatus(location) {
+      if (!Number.isFinite(Number(location.latitude)) || !Number.isFinite(Number(location.longitude))) {
+        return { label: 'Factory unknown', className: 'offline' };
+      }
+      return isInsideFactoryZone(location)
+        ? { label: 'Inside factory', className: 'inside' }
+        : { label: 'Outside factory', className: 'outside' };
+    }
+
+    function reliableSpeedText(location) {
+      const speed = Number(location.speedKmh);
+      if (!Number.isFinite(speed) || speed < 0) return '-- km/h';
+      return Math.round(speed) + ' km/h';
+    }
+
+    function userHistoryFor(location, historyPoints) {
+      return (historyPoints || [])
+        .filter((point) => point.userId === location.userId)
+        .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
+        .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+    }
+
+    function buildTodayDeliverySummary(location, historyPoints) {
+      const points = userHistoryFor(location, historyPoints);
+      const sourcePoints = points.length ? points : [location];
+      const trips = splitFactoryTrips(sourcePoints);
+      const activeTrip = trips.find((trip) => !trip.isComplete);
+      const latestTrip = trips[trips.length - 1];
+      const summary = trips.reduce((total, trip) => {
+        const report = buildTripReport(trip.points);
+        total.distanceMeters += report.distanceMeters;
+        total.timeMs += report.totalTimeMs;
+        total.stops += report.stops.length;
+        return total;
+      }, { distanceMeters: 0, timeMs: 0, stops: 0 });
+
+      let tripStatus = 'No active trip';
+      if (activeTrip) {
+        tripStatus = 'Active delivery';
+      } else if (latestTrip && latestTrip.isComplete) {
+        tripStatus = 'Returned to factory';
+      }
+
+      return {
+        tripStatus,
+        todayKm: formatDistance(summary.distanceMeters),
+        totalTripTime: formatDuration(summary.timeMs),
+        stopsCount: String(summary.stops)
+      };
+    }
+
+    function deliveryStatusCardHtml(location, historyPoints, compact) {
+      const live = deliveryLiveStatus(location, historyPoints);
+      const factory = factoryStatus(location);
+      const summary = buildTodayDeliverySummary(location, historyPoints);
+      const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + location.latitude + ',' + location.longitude;
+      const cardClass = compact ? 'delivery-status-card compact' : 'delivery-status-card';
+      return '<div class="' + cardClass + '">' +
+        '<div class="delivery-card-header">' +
+          '<div>' +
+            '<div class="delivery-card-name">' + escapeText(location.name || 'Driver') + '</div>' +
+            '<div class="delivery-card-updated">Last updated ' + escapeText(timeAgo(location)) + '</div>' +
+          '</div>' +
+          '<div class="delivery-status-chips">' +
+            '<span class="delivery-chip ' + live.className + '">' + escapeText(live.label) + '</span>' +
+            '<span class="delivery-chip ' + factory.className + '">' + escapeText(factory.label) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="delivery-card-grid">' +
+          deliveryMetricHtml('Current speed', reliableSpeedText(location)) +
+          deliveryMetricHtml('Trip status', summary.tripStatus) +
+          deliveryMetricHtml('Today km', summary.todayKm) +
+          deliveryMetricHtml('Trip time', summary.totalTripTime) +
+          deliveryMetricHtml('Stops', summary.stopsCount) +
+          deliveryMetricHtml('Updated', timeAgo(location)) +
+        '</div>' +
+        '<div class="delivery-card-actions">' +
+          '<button type="button" onclick="focusUser(\\\'' + escapeText(location.userId) + '\\\')">Follow Live</button>' +
+          '<a target="_blank" rel="noopener" href="' + mapsUrl + '">Open in Google Maps</a>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function deliveryMetricHtml(label, value) {
+      return '<div class="delivery-card-metric">' +
+        '<div class="delivery-card-label">' + escapeText(label) + '</div>' +
+        '<div class="delivery-card-value">' + escapeText(value) + '</div>' +
+      '</div>';
     }
 
     function timeAgo(location) {
@@ -1226,21 +1375,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
 
     function popupHtml(location) {
-      const status = statusFor(location);
-      const accuracy = location.accuracy ? Math.round(location.accuracy) + 'm accuracy' : 'accuracy unknown';
-      const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + location.latitude + ',' + location.longitude;
-      let telemetryHtml = '<tr><td><strong>Motion:</strong></td><td>' +
-        motionLabel(motionStatusFor(location, lastHistoryPoints)) +
-        '</td></tr>';
-      if (location.isCallActive) {
-        telemetryHtml += '<tr><td><strong>Call Status:</strong></td><td style="color:#fbbf24;font-weight:bold">On Active Phone Call</td></tr>';
-      }
-
-      return '<strong>' + escapeText(location.name || 'Factory Phone') + '</strong><br>' +
-        '<span style="color:' + status.color + '">' + status.label + '</span> - ' + timeAgo(location) + '<br>' +
-        escapeText(accuracy) + '<br>' +
-        '<table style="margin-top:6px;font-size:12px;border-top:1px solid #374151;padding-top:4px">' + telemetryHtml + '</table>' +
-        '<br><a style="color:#38bdf8" target="_blank" rel="noopener" href="' + mapsUrl + '">Open in Google Maps</a>';
+      return deliveryStatusCardHtml(location, lastHistoryPoints, false);
     }
 
     function liveTrailPoints(points) {
@@ -1510,30 +1645,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         return;
       }
       list.innerHTML = locations.map((location) => {
-        const status = statusFor(location);
-        const accuracy = location.accuracy ? Math.round(location.accuracy) + 'm' : 'unknown';
-        const pointCount = historyCounts.get(location.userId) || 0;
-        const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + location.latitude + ',' + location.longitude;
-        let badgesHtml = motionBadgeHtml(location, historyPoints || []);
-
-        if (location.isCallActive) {
-          badgesHtml += '<span class="call-blink">On Call</span>';
-        }
-
-        return '<div class="user">' +
-          '<div>' +
-            '<div style="font-weight:800;display:flex;align-items:center;gap:6px">' +
-              escapeText(location.name || 'Factory Phone') +
-              badgesHtml +
-            '</div>' +
-            '<div class="muted"><span class="dot" style="background:' + status.color + '"></span> ' +
-              status.label + ' - ' + timeAgo(location) + ' - ' + escapeText(accuracy) + ' - Trail ' + pointCount + '</div>' +
-          '</div>' +
-          '<div style="display:flex;gap:6px;align-items:center">' +
-            '<button onclick="focusUser(\\\'' + escapeText(location.userId) + '\\\')">Track</button>' +
-            '<a target="_blank" rel="noopener" href="' + mapsUrl + '">Google</a>' +
-          '</div>' +
-        '</div>';
+        return '<div class="user">' + deliveryStatusCardHtml(location, historyPoints || [], true) + '</div>';
       }).join('');
       renderTripReport(historyPoints || []);
     }

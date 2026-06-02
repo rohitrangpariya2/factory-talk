@@ -15,21 +15,34 @@ describe('factory telemetry map script', () => {
     expect(handlerSource).toContain('isCallActive');
   });
 
-  test('contains call blink style rules and UI indicators', () => {
-    expect(indexSource).toContain('.call-blink {');
-    expect(indexSource).toContain('class="call-blink"');
-    expect(indexSource).toContain('On Call');
+  test('renders the delivery status card instead of the old motion badge design', () => {
+    expect(indexSource).toContain('.delivery-status-card');
+    expect(indexSource).toContain('function deliveryStatusCardHtml');
+    expect(indexSource).toContain('function deliveryLiveStatus');
+    expect(indexSource).toContain('function buildTodayDeliverySummary');
+    expect(indexSource).toContain('deliveryStatusCardHtml(location, lastHistoryPoints, false)');
+    expect(indexSource).toContain('deliveryStatusCardHtml(location, historyPoints || [], true)');
+    expect(indexSource).not.toContain('.motion-badge {');
+    expect(indexSource).not.toContain('function motionBadgeHtml');
+    expect(indexSource).not.toContain('class="call-blink"');
   });
 
-  test('contains motion speed indicators for stationary, moving, driving, and stale states', () => {
-    expect(indexSource).toContain('.motion-badge {');
+  test('contains delivery card states and summary fields', () => {
     expect(indexSource).toContain('function motionStatusFor');
     expect(indexSource).toContain('function recentMovementSpeed');
     expect(indexSource).toContain('MOTION_STATIONARY_CONFIRM_MS = 60 * 1000');
-    expect(indexSource).toContain('Stationary');
+    expect(indexSource).toContain('Stopped');
     expect(indexSource).toContain('GPS stale');
     expect(indexSource).toContain('Moving');
-    expect(indexSource).toContain('Driving');
+    expect(indexSource).toContain('Offline');
+    expect(indexSource).toContain('Inside factory');
+    expect(indexSource).toContain('Outside factory');
+    expect(indexSource).toContain('Current speed');
+    expect(indexSource).toContain('Trip status');
+    expect(indexSource).toContain('Today km');
+    expect(indexSource).toContain('Trip time');
+    expect(indexSource).toContain('Stops');
+    expect(indexSource).toContain('-- km/h');
     expect(indexSource).toContain('km/h');
   });
 });

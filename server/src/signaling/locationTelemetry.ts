@@ -14,6 +14,7 @@ export type AcceptedLocation = {
   bearing?: number;
   bearingAccuracyDegrees?: number;
   isCallActive?: boolean;
+  isOnline?: boolean;
 };
 
 const MAX_TRUSTED_CLIENT_SPEED_KMH = 130;

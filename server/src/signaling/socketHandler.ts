@@ -34,6 +34,7 @@ type TrackedLocation = {
   bearingAccuracyDegrees?: number;
   isCallActive?: boolean;
   motionStatus?: MotionStatus;
+  isOnline?: boolean;
 };
 
 type LocationHistoryPoint = TrackedLocation & {
@@ -240,7 +241,8 @@ export function setupSocketHandler(io: Server) {
         isBusy: !!user.isBusy,
         receivedAt: now,
         locationUpdatedAt: user.locationUpdatedAt,
-        isCallActive
+        isCallActive,
+        isOnline: true
       }, latestLocations.get(user.userId), speedKmh, bearing, bearingAccuracyDegrees) as TrackedLocation;
       latestLocations.set(user.userId, trackedLocation);
       appendLocationHistory(trackedLocation);
@@ -395,6 +397,18 @@ export function setupSocketHandler(io: Server) {
 
       if (!user.isDeviceAuth) {
         await updateUserOnlineStatus(user.userId, false);
+      }
+      const latestLocation = latestLocations.get(user.userId);
+      if (latestLocation) {
+        latestLocations.set(user.userId, {
+          ...latestLocation,
+          isOnline: false
+        });
+        io.emit('user_location_updated', {
+          ...latestLocation,
+          isOnline: false,
+          motionStatus: classifyMotionStatus(latestLocation, getLocationHistory(user.userId), Date.now())
+        });
       }
     });
   });
