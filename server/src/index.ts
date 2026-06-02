@@ -9,6 +9,15 @@ import authRoutes from './api/routes/auth';
 import userRoutes from './api/routes/users';
 import channelRoutes from './api/routes/channels';
 import { buildFactoryZoneScript } from './map/factoryZone';
+import {
+  buildOsrmMatchUrl,
+  buildRoadMatchFallback,
+  parseOsrmMatchResponse,
+  prepareRoadMatchPoints,
+  roadMatchCacheKey,
+  type RoadMatchInputPoint,
+  type RoadMatchResult
+} from './map/roadMatch';
 import { buildOsrmRouteUrl, normalizeRoadRouteCoordinates } from './map/roadRoute';
 import { buildRoadTrailScript } from './map/roadTrail';
 import { buildStopMarkersScript } from './map/stopMarkers';
@@ -25,6 +34,9 @@ import { getStopEventsForRange } from './stops/stopHistoryService';
 
 const app = express();
 const server = http.createServer(app);
+const roadMatchCache = new Map<string, { expiresAt: number; result: RoadMatchResult }>();
+const ROAD_MATCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const ROAD_MATCH_CACHE_MAX_ENTRIES = 400;
 
 function escapeHtml(value: string): string {
   return value
@@ -129,6 +141,97 @@ app.get('/road-route', async (req, res) => {
     res.status(502).json({ code: 'RouteProxyFailed' });
   }
 });
+
+function getRoadMatchPointsFromQuery(value: unknown, timestampValue?: unknown, accuracyValue?: unknown): RoadMatchInputPoint[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  const trimmed = value.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  const timestamps = typeof timestampValue === 'string' ? timestampValue.split(';') : [];
+  const accuracies = typeof accuracyValue === 'string' ? accuracyValue.split(';') : [];
+  return trimmed
+    .split(';')
+    .map((part, index) => {
+      const [longitude, latitude] = part.split(',').map(Number);
+      return {
+        latitude,
+        longitude,
+        timestamp: timestamps[index],
+        accuracy: accuracies[index]
+      };
+    });
+}
+
+function readRoadMatchRequestPoints(req: express.Request): RoadMatchInputPoint[] {
+  const bodyPoints = req.body && Array.isArray(req.body.points) ? req.body.points : undefined;
+  if (bodyPoints) return bodyPoints;
+  return getRoadMatchPointsFromQuery(req.query.points || req.query.coordinates, req.query.timestamps, req.query.radiuses);
+}
+
+async function buildRoadMatchResponse(points: RoadMatchInputPoint[]): Promise<RoadMatchResult> {
+  const prepared = prepareRoadMatchPoints(points);
+  if (prepared.length < 2) {
+    return buildRoadMatchFallback(prepared, 'Not enough valid points after filtering');
+  }
+
+  const key = roadMatchCacheKey(prepared);
+  const cached = roadMatchCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+
+  let result: RoadMatchResult;
+  try {
+    const matchResponse = await fetch(buildOsrmMatchUrl(prepared), {
+      headers: {
+        'User-Agent': 'FactoryTalk/1.0 (https://factory-talk-server.onrender.com)'
+      }
+    });
+    if (!matchResponse.ok) {
+      result = buildRoadMatchFallback(prepared, `OSRM match failed with ${matchResponse.status}`);
+    } else {
+      const matched = parseOsrmMatchResponse(await matchResponse.json());
+      result = matched.length >= 2
+        ? { status: 'matched', coordinates: matched }
+        : buildRoadMatchFallback(prepared, 'OSRM match returned no usable geometry');
+    }
+  } catch (error) {
+    result = buildRoadMatchFallback(prepared, error instanceof Error ? error.message : 'OSRM match request failed');
+  }
+
+  if (roadMatchCache.size >= ROAD_MATCH_CACHE_MAX_ENTRIES) {
+    const oldestKey = roadMatchCache.keys().next().value;
+    if (oldestKey) roadMatchCache.delete(oldestKey);
+  }
+  roadMatchCache.set(key, { expiresAt: Date.now() + ROAD_MATCH_CACHE_TTL_MS, result });
+  return result;
+}
+
+async function roadMatchHandler(req: express.Request, res: express.Response): Promise<void> {
+  try {
+    const points = readRoadMatchRequestPoints(req);
+    const result = await buildRoadMatchResponse(points);
+    if (result.coordinates.length < 2) {
+      res.status(400).json(result);
+      return;
+    }
+    res.setHeader('Cache-Control', 'private, max-age=20');
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Failed to match road route:', error);
+    res.status(502).json({ status: 'fallback', coordinates: [], reason: 'RoadMatchProxyFailed' });
+  }
+}
+
+app.get('/road-match', roadMatchHandler);
+app.post('/road-match', roadMatchHandler);
 
 app.get('/delivery-history', (_req, res) => {
   res.setHeader(
@@ -2171,7 +2274,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           if (cachedRoute && cachedRoute.length > 1) {
             return Promise.resolve(cachedRoute);
           } else if (roadPoints.length > 1) {
-            return fetchRoadLatLngs(roadPoints)
+            return fetchRoadLatLngs(roadPoints, { force: true })
               .then((roadLatLngs) => {
                 if (roadLatLngs.length > 1) {
                   tripRouteCache.set(routeCacheKey, roadLatLngs);

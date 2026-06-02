@@ -262,11 +262,13 @@ export function buildDeliveryHistoryDashboardHtml(): string {
       drawRoute(report.routeReplay || []);
       drawStopMarkers(report.stops || []);
       setStatus((report.routeReplay || []).length ? 'Report loaded. Route replay is ready.' : 'No history available for selected user/date.');
+      matchHistoryRoute(report.routeReplay || []);
     }
 
     function drawRoute(points) {
       const latLngs = points.map((point) => [point.latitude, point.longitude]);
       if (latLngs.length < 1) return;
+      if (routeLine) map.removeLayer(routeLine);
       routeLine = L.polyline(latLngs, {
         color: '#2563eb',
         weight: 5,
@@ -278,6 +280,43 @@ export function buildDeliveryHistoryDashboardHtml(): string {
         map.fitBounds(L.latLngBounds(latLngs), { padding: [42, 42], maxZoom: 17 });
       } else {
         map.setView(latLngs[0], 17);
+      }
+    }
+
+    function buildRoadMatchPayload(points) {
+      return {
+        points: points.map((point) => ({
+          latitude: Number(point.latitude),
+          longitude: Number(point.longitude),
+          timestamp: Number(point.timestamp || point.locationUpdatedAt || 0) || undefined,
+          accuracy: Number(point.accuracy || 0) || undefined
+        }))
+      };
+    }
+
+    async function matchHistoryRoute(points) {
+      if (!currentReport || !points || points.length < 2) return;
+      try {
+        const response = await fetch('/road-match', {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildRoadMatchPayload(points))
+        });
+        const data = await response.json();
+        if (!response.ok || !data || !Array.isArray(data.coordinates) || data.coordinates.length < 2) return;
+        currentReport.matchedRouteReplay = data.coordinates
+          .map((coordinate) => ({
+            latitude: Number(coordinate.latitude),
+            longitude: Number(coordinate.longitude)
+          }))
+          .filter((coordinate) => Number.isFinite(coordinate.latitude) && Number.isFinite(coordinate.longitude));
+        if (currentReport.matchedRouteReplay.length >= 2) {
+          drawRoute(currentReport.matchedRouteReplay);
+          setStatus(data.status === 'matched' ? 'Report loaded. Road-matched replay is ready.' : 'Report loaded. Cleaned fallback replay is ready.');
+        }
+      } catch (error) {
+        // Keep raw accepted GPS replay when road matching is unavailable.
       }
     }
 
@@ -316,7 +355,7 @@ export function buildDeliveryHistoryDashboardHtml(): string {
       }
       stopReplay(false);
       let index = 0;
-      const points = currentReport.routeReplay;
+      const points = currentReport.matchedRouteReplay || currentReport.routeReplay;
       replayMarker = L.circleMarker([points[0].latitude, points[0].longitude], {
         radius: 8,
         color: '#ffffff',

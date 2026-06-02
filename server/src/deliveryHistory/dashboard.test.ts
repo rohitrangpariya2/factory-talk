@@ -26,4 +26,15 @@ describe('delivery history dashboard route', () => {
     expect(html).toContain('/delivery-history/export');
     expect(html).toContain('loadReport();');
   });
+
+  test('uses shared road matching for route display and replay fallback', () => {
+    const html = buildDeliveryHistoryDashboardHtml();
+
+    expect(html).toContain('/road-match');
+    expect(html).toContain('async function matchHistoryRoute(points)');
+    expect(html).toContain('matchedRouteReplay');
+    expect(html).toContain("method: 'POST'");
+    expect(html).toContain('drawRoute(report.routeReplay || []);');
+    expect(html).toContain('const points = currentReport.matchedRouteReplay || currentReport.routeReplay;');
+  });
 });
