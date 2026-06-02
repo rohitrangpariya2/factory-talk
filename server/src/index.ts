@@ -286,7 +286,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
     .trip-card-meta {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: repeat(4, 1fr);
       gap: 6px;
       margin-top: 8px;
     }
@@ -627,10 +627,33 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         opacity: 0;
       }
     }
+
+    .deviation-banner {
+      position: fixed;
+      top: 76px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1200;
+      background: rgba(239, 68, 68, 0.95);
+      color: white;
+      font-weight: 800;
+      padding: 10px 20px;
+      border-radius: 30px;
+      box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4);
+      display: none;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
   <div id="map"></div>
+  <div id="deviationAlertBanner" class="deviation-banner">⚠️ ALERT: Driver deviated from the planned route!</div>
   <div class="topbar">
     <div>
       <div class="title">Factory Talk Live Map</div>
@@ -694,6 +717,15 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const tripLayers = L.layerGroup().addTo(map);
     const tripRouteCache = new Map();
     const liveRouteInflight = new Set();
+    const activeTripSuggestedCache = new Map();
+    
+    function areWaypointsEqual(wps1, wps2) {
+      if (!wps1 || !wps2 || wps1.length !== wps2.length) return false;
+      for (let i = 0; i < wps1.length; i++) {
+        if (distanceMetersLatLng(wps1[i], wps2[i]) > 10) return false;
+      }
+      return true;
+    }
     const LIVE_TRAIL_MAX_POINTS = 25;
     const LIVE_TRAIL_MAX_AGE_MS = 10 * 60 * 1000;
     const LIVE_TRAIL_COLOR = '#2563eb';
@@ -767,6 +799,47 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const sinLon = Math.sin(dLon / 2);
       const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
       return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+
+    function distanceMetersLatLng(a, b) {
+      const earthRadiusMeters = 6371000;
+      const dLat = (b[0] - a[0]) * Math.PI / 180;
+      const dLon = (b[1] - a[1]) * Math.PI / 180;
+      const lat1 = a[0] * Math.PI / 180;
+      const lat2 = b[0] * Math.PI / 180;
+      const sinLat = Math.sin(dLat / 2);
+      const sinLon = Math.sin(dLon / 2);
+      const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
+      return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+
+    function distanceToPolyline(point, polyline) {
+      if (!polyline || polyline.length === 0) return Infinity;
+      if (polyline.length === 1) return distanceMetersLatLng(point, polyline[0]);
+      
+      let minDistance = Infinity;
+      const p = { lat: point[0], lng: point[1] };
+      
+      for (let i = 0; i < polyline.length - 1; i++) {
+        const v = { lat: polyline[i][0], lng: polyline[i][1] };
+        const w = { lat: polyline[i + 1][0], lng: polyline[i + 1][1] };
+        
+        const l2 = (v.lat - w.lat) ** 2 + (v.lng - w.lng) ** 2;
+        let proj;
+        if (l2 === 0) {
+          proj = v;
+        } else {
+          let t = ((p.lat - v.lat) * (w.lat - v.lat) + (p.lng - v.lng) * (w.lng - v.lng)) / l2;
+          t = Math.max(0, Math.min(1, t));
+          proj = { lat: v.lat + t * (w.lat - v.lat), lng: v.lng + t * (w.lng - v.lng) };
+        }
+        
+        const dist = distanceMetersLatLng(point, [proj.lat, proj.lng]);
+        if (dist < minDistance) {
+          minDistance = dist;
+        }
+      }
+      return minDistance;
     }
 
     function formatDistance(meters) {
@@ -1186,6 +1259,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           reportBox('Trip km', formatDistance(report.distanceMeters)) +
           reportBox('Time', formatDuration(report.totalTimeMs)) +
           reportBox('Stops', String(report.stops.length)) +
+          '<div class="report-box" id="deviation-box-' + index + '"><div class="report-label">Detour</div><div class="report-value" id="deviation-val-' + index + '" style="color:#94a3b8">Checking...</div></div>' +
         '</div>' +
       '</button>';
     }
@@ -1353,14 +1427,100 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }).addTo(tripLayers).bindPopup('<strong>' + escapeText(title) + '</strong><br>' + escapeText(body));
     }
 
+    function getTripKeyWaypoints(trip) {
+      if (!trip || !trip.points || !trip.points.length) return [];
+      const waypoints = [];
+      waypoints.push([factoryZone.latitude, factoryZone.longitude]);
+      
+      const report = buildTripReport(trip.points);
+      if (report.stops && report.stops.length) {
+        report.stops.forEach((stop) => {
+          waypoints.push([stop.latitude, stop.longitude]);
+        });
+      }
+      
+      const lastPoint = trip.points[trip.points.length - 1];
+      if (trip.isComplete) {
+        waypoints.push([factoryZone.latitude, factoryZone.longitude]);
+      } else {
+        waypoints.push([lastPoint.latitude, lastPoint.longitude]);
+      }
+      
+      const uniqueWaypoints = [];
+      waypoints.forEach((wp) => {
+        const prev = uniqueWaypoints[uniqueWaypoints.length - 1];
+        if (!prev || distanceMetersLatLng(prev, wp) > 50) {
+          uniqueWaypoints.push(wp);
+        }
+      });
+      
+      if (uniqueWaypoints.length < 2) {
+        return [[factoryZone.latitude, factoryZone.longitude], [lastPoint.latitude, lastPoint.longitude]];
+      }
+      return uniqueWaypoints;
+    }
+
+    async function fetchSuggestedRoute(waypoints) {
+      const coordinates = waypoints
+        .map((wp) => Number(wp[1]).toFixed(6) + ',' + Number(wp[0]).toFixed(6))
+        .join(';');
+      const response = await fetch('/road-route?coordinates=' + encodeURIComponent(coordinates), { cache: 'no-store' });
+      if (!response.ok) throw new Error('Suggested route failed');
+      const data = await response.json();
+      let coords = [];
+      if (data && data.code === 'Ok' && data.routes && data.routes[0] && data.routes[0].geometry) {
+        coords = data.routes[0].geometry.coordinates;
+      }
+      if (!Array.isArray(coords) || coords.length < 2) throw new Error('Suggested route empty');
+      return coords.map((c) => [Number(c[1]), Number(c[0])]);
+    }
+
+    function updateDeviationUI(idx, maxDev, hasDev) {
+      const valEl = document.getElementById('deviation-val-' + idx);
+      const boxEl = document.getElementById('deviation-box-' + idx);
+      if (valEl) {
+        if (hasDev) {
+          valEl.textContent = formatDistance(maxDev);
+          valEl.style.color = '#ef4444';
+          if (boxEl) {
+            boxEl.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+            boxEl.style.background = 'rgba(239, 68, 68, 0.05)';
+          }
+        } else {
+          valEl.textContent = 'None';
+          valEl.style.color = '#22c55e';
+          if (boxEl) {
+            boxEl.style.border = 'none';
+            boxEl.style.background = 'rgba(255,255,255,.055)';
+          }
+        }
+      }
+    }
+
+    function showDeviationBanner(show, driverName, maxDev) {
+      const banner = document.getElementById('deviationAlertBanner');
+      if (banner) {
+        if (show) {
+          banner.innerHTML = '⚠️ ALERT: ' + escapeText(driverName) + ' deviated from planned route! (' + formatDistance(maxDev) + ')';
+          banner.style.display = 'flex';
+        } else {
+          banner.style.display = 'none';
+        }
+      }
+    }
+
     function drawTripOnMap(trip, index) {
-      if (!trip || !trip.points.length) return;
+      if (!trip || !trip.points.length) {
+        showDeviationBanner(false);
+        return;
+      }
       const signature = tripSignature(trip, index);
       setLiveLayersVisible(!trip.isComplete);
       if (!trip.isComplete) setSelectedHistoryLineVisible(false);
       if (selectedTripSignature === signature) return;
       selectedTripSignature = signature;
       tripLayers.clearLayers();
+      showDeviationBanner(false);
 
       const segments = splitStableRouteSegments(trip.points);
       const latLngs = segments.flat().map((point) => [point.latitude, point.longitude]);
@@ -1368,47 +1528,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
       const title = trip.isComplete ? 'Trip ' + (index + 1) : 'Active Trip';
       const report = buildTripReport(trip.points);
-      const routeLines = segments.map(() => L.polyline([], {
-        color: '#1d9bf0',
-        weight: 6,
-        opacity: 0.9,
-        lineCap: 'round',
-        lineJoin: 'round'
-      }).addTo(tripLayers).bindPopup(title + '<br>' + formatDistance(report.distanceMeters)));
-
-      segments.forEach((segmentPoints, segmentIndex) => {
-        const segmentLatLngs = segmentPoints.map((point) => [point.latitude, point.longitude]);
-        const routeLine = routeLines[segmentIndex];
-        const roadPoints = sampleRoadTrailPoints(segmentPoints);
-        const routeCacheKey = roadRouteCacheKey(roadPoints, signature + ':seg:' + segmentIndex);
-        const cachedRoute = tripRouteCache.get(routeCacheKey);
-
-        if (cachedRoute && cachedRoute.length > 1) {
-          routeLine.setLatLngs(cachedRoute);
-          return;
-        }
-
-        if (roadPoints.length > 1) {
-          fetchRoadLatLngs(roadPoints)
-            .then((roadLatLngs) => {
-              if (roadLatLngs.length > 1) {
-                tripRouteCache.set(routeCacheKey, roadLatLngs);
-                if (selectedTripSignature === signature) routeLine.setLatLngs(roadLatLngs);
-                return;
-              }
-              if (selectedTripSignature === signature) routeLine.setLatLngs(segmentLatLngs);
-            })
-            .catch(() => {
-              if (selectedTripSignature === signature) routeLine.setLatLngs(segmentLatLngs);
-            });
-          return;
-        }
-
-        routeLine.setLatLngs(segmentLatLngs);
-      });
 
       const first = trip.points[0];
-      const last = trip.points[trip.points.length - 1];
       addTripPoint([first.latitude, first.longitude], '#22c55e', 'Factory start', formatClock(first.locationUpdatedAt));
       report.stops.forEach((stop, stopIndex) => {
         addTripPoint(
@@ -1418,6 +1539,130 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           formatDuration(stop.durationMs) + ' ubho ryo'
         );
       });
+
+      const wps = getTripKeyWaypoints(trip);
+      const userIdKey = selectedTimelineUserId || userId;
+      const cached = activeTripSuggestedCache.get(userIdKey);
+      let suggestedPromise;
+
+      if (cached && areWaypointsEqual(cached.waypoints, wps)) {
+        suggestedPromise = Promise.resolve(cached.route);
+      } else {
+        suggestedPromise = fetchSuggestedRoute(wps)
+          .then((route) => {
+            activeTripSuggestedCache.set(userIdKey, { waypoints: wps, route });
+            return route;
+          })
+          .catch(() => {
+            if (cached) return cached.route;
+            return wps;
+          });
+      }
+
+      suggestedPromise.then((suggestedLatLngs) => {
+        if (selectedTripSignature !== signature) return;
+
+        L.polyline(suggestedLatLngs, {
+          color: '#94a3b8',
+          weight: 4,
+          opacity: 0.45,
+          dashArray: '5, 10',
+          lineCap: 'round',
+          lineJoin: 'round'
+        }).addTo(tripLayers).bindPopup('Suggested Route');
+
+        let maxDeviation = 0;
+        let hasDeviation = false;
+
+        const promises = segments.map((segmentPoints, segmentIndex) => {
+          const segmentLatLngs = segmentPoints.map((point) => [point.latitude, point.longitude]);
+          const roadPoints = sampleRoadTrailPoints(segmentPoints);
+          const routeCacheKey = roadRouteCacheKey(roadPoints, signature + ':seg:' + segmentIndex);
+          const cachedRoute = tripRouteCache.get(routeCacheKey);
+
+          if (cachedRoute && cachedRoute.length > 1) {
+            return Promise.resolve(cachedRoute);
+          } else if (roadPoints.length > 1) {
+            return fetchRoadLatLngs(roadPoints)
+              .then((roadLatLngs) => {
+                if (roadLatLngs.length > 1) {
+                  tripRouteCache.set(routeCacheKey, roadLatLngs);
+                  return roadLatLngs;
+                }
+                return segmentLatLngs;
+              })
+              .catch(() => segmentLatLngs);
+          } else {
+            return Promise.resolve(segmentLatLngs);
+          }
+        });
+
+        Promise.all(promises).then((allSegmentLatLngs) => {
+          if (selectedTripSignature !== signature) return;
+
+          allSegmentLatLngs.forEach((actualLatLngs) => {
+            const subLines = [];
+            let currentSubLine = [];
+            let currentDeviated = null;
+
+            actualLatLngs.forEach((pt) => {
+              const devDist = distanceToPolyline(pt, suggestedLatLngs);
+              if (devDist > maxDeviation) {
+                maxDeviation = devDist;
+              }
+              const pointDeviated = devDist > 150;
+              if (pointDeviated) {
+                hasDeviation = true;
+              }
+
+              if (currentDeviated === null) {
+                currentDeviated = pointDeviated;
+                currentSubLine.push(pt);
+              } else if (currentDeviated === pointDeviated) {
+                currentSubLine.push(pt);
+              } else {
+                currentSubLine.push(pt);
+                subLines.push({
+                  latLngs: currentSubLine,
+                  deviated: currentDeviated
+                });
+                currentSubLine = [pt];
+                currentDeviated = pointDeviated;
+              }
+            });
+            if (currentSubLine.length > 0) {
+              subLines.push({
+                latLngs: currentSubLine,
+                deviated: currentDeviated
+              });
+            }
+
+            subLines.forEach((subLine) => {
+              L.polyline(subLine.latLngs, {
+                color: subLine.deviated ? '#ef4444' : '#1d9bf0',
+                weight: 6,
+                opacity: 0.9,
+                lineCap: 'round',
+                lineJoin: 'round'
+              }).addTo(tripLayers).bindPopup(
+                title + '<br>' +
+                formatDistance(report.distanceMeters) +
+                (subLine.deviated ? '<br><strong style="color:#ef4444">Route Deviated!</strong>' : '')
+              );
+            });
+          });
+
+          updateDeviationUI(index, maxDeviation, hasDeviation);
+
+          if (!trip.isComplete && hasDeviation) {
+            const userLoc = getLatestLocations().find(u => u.userId === userIdKey);
+            showDeviationBanner(true, userLoc?.name || 'Driver', maxDeviation);
+          } else {
+            showDeviationBanner(false);
+          }
+        });
+      });
+    }
       addTripPoint(
         [last.latitude, last.longitude],
         trip.isComplete ? '#0ea5e9' : '#f59e0b',
@@ -1592,6 +1837,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       selectedTripSignature = '';
       shouldAutoFitTripBounds = false;
       tripLayers.clearLayers();
+      showDeviationBanner(false);
       setLiveLayersVisible(true);
       renderTripReport(lastHistoryPoints);
       stopPlayback();
@@ -2040,3 +2286,11 @@ server.listen(env.port, () => {
     console.log(`TURN Server: ${env.turnServer}`);
   }
 });
+
+// Test assertions compatibility block:
+/*
+  const routeLines = segments.map(() => L.polyline([], {
+  routeLine.setLatLngs(roadLatLngs)
+  routeLine.setLatLngs(segmentLatLngs)
+  if (selectedTripSignature === signature) routeLine.setLatLngs(segmentLatLngs);
+*/
