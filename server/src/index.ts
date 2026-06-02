@@ -1093,13 +1093,19 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         return;
       }
       if (selectedTripIndex < 0 && !forceLiveMapMode) {
-        // Select active trip if exists, otherwise latest completed trip
+        // Only auto-select if there is an active (incomplete) trip
         const activeIndex = trips.findIndex((trip) => !trip.isComplete);
         console.log('[FactoryTalk Debug] selectedTripIndex was negative, activeIndex:', activeIndex, 'trips count:', trips.length);
-        selectedTripIndex = activeIndex >= 0 ? activeIndex : trips.length - 1;
-        console.log('[FactoryTalk Debug] auto-selected trip index:', selectedTripIndex);
-        selectedTripSignature = '';
-        shouldAutoFitTripBounds = true;
+        if (activeIndex >= 0) {
+          selectedTripIndex = activeIndex;
+          selectedTripSignature = '';
+          shouldAutoFitTripBounds = true;
+        } else {
+          // All trips completed - stay in live map mode so marker stays visible
+          forceLiveMapMode = true;
+          selectedTripIndex = -1;
+        }
+        console.log('[FactoryTalk Debug] auto-selected trip index:', selectedTripIndex, 'forceLiveMapMode:', forceLiveMapMode);
       }
 
       const summary = buildTripSummary(trips);
@@ -1425,7 +1431,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }
       const signature = tripSignature(trip, index);
       setLiveLayersVisible(!trip.isComplete);
-      if (!trip.isComplete) setSelectedHistoryLineVisible(false);
+      // For active trips, keep the live GPS trail visible alongside the snapped route
       if (selectedTripSignature === signature) return;
       selectedTripSignature = signature;
       tripLayers.clearLayers();
@@ -1878,4 +1884,5 @@ server.listen(env.port, () => {
   routeLine.setLatLngs(roadLatLngs)
   routeLine.setLatLngs(segmentLatLngs)
   if (selectedTripSignature === signature) routeLine.setLatLngs(segmentLatLngs);
+  setSelectedHistoryLineVisible(false);
 */
