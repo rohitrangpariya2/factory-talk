@@ -1036,7 +1036,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
               status.label + ' - ' + timeAgo(location) + ' - ' + escapeText(accuracy) + ' - Trail ' + pointCount + '</div>' +
           '</div>' +
           '<div style="display:flex;gap:6px;align-items:center">' +
-            '<button onclick="focusUser(\'' + escapeText(location.userId) + '\')">Track</button>' +
+            '<button onclick="focusUser(\\\'' + escapeText(location.userId) + '\\\')">Track</button>' +
             '<a target="_blank" rel="noopener" href="' + mapsUrl + '">Google</a>' +
           '</div>' +
         '</div>';
