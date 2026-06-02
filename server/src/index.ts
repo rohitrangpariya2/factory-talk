@@ -14,6 +14,10 @@ import { buildRoadTrailScript } from './map/roadTrail';
 import { buildStopMarkersScript } from './map/stopMarkers';
 import { buildDeliveryHistoryDashboardHtml } from './deliveryHistory/dashboard';
 import { buildDeliveryHistoryReport, deliveryHistoryReportToCsv, parseDeliveryHistoryDateRange } from './deliveryHistory/report';
+import { buildGeofenceHistoryDashboardHtml } from './geofence/geofenceDashboard';
+import { DEFAULT_GEOFENCE_CONFIG, getGeofenceConfig, saveGeofenceConfig } from './geofence/geofenceConfigService';
+import { getGeofenceEventsForRange } from './geofence/geofenceHistoryService';
+import { buildGeofenceDailyReport } from './geofence/geofenceReport';
 import { getSavedLocationHistory, getSavedLocationHistoryForRange, scheduleLocationHistoryCleanup } from './services/locationHistoryService';
 import { getLatestLocations, getLocationHistory, setupSocketHandler } from './signaling/socketHandler';
 
@@ -185,6 +189,59 @@ app.get('/delivery-history/export', async (req, res) => {
     const message = error instanceof Error ? error.message : 'Failed to export delivery history report';
     const status = message.includes('date') ? 400 : 500;
     res.status(status).json({ error: message });
+  }
+});
+
+app.get('/geofence-history', (_req, res) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'"
+  );
+  res.type('html').send(buildGeofenceHistoryDashboardHtml());
+});
+
+app.get('/geofence-history/events', async (req, res) => {
+  try {
+    const date = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+    const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : undefined;
+    const timezoneOffsetMinutes = req.query.timezoneOffsetMinutes !== undefined
+      ? Number(req.query.timezoneOffsetMinutes)
+      : undefined;
+    if (!date) {
+      res.status(400).json({ error: 'date is required' });
+      return;
+    }
+    const range = parseDeliveryHistoryDateRange(date, timezoneOffsetMinutes);
+    const events = await getGeofenceEventsForRange(range.startMs, range.endMs, userId);
+    const report = buildGeofenceDailyReport(events);
+    res.status(200).json({ events, report });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load geofence history';
+    const status = message.includes('date') ? 400 : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get('/geofence-config', async (_req, res) => {
+  try {
+    const config = await getGeofenceConfig();
+    res.status(200).json({ config });
+  } catch (error) {
+    res.status(200).json({ config: DEFAULT_GEOFENCE_CONFIG, warning: 'Using default geofence config' });
+  }
+});
+
+app.post('/geofence-config', async (req, res) => {
+  try {
+    const config = await saveGeofenceConfig({
+      latitude: Number(req.body?.latitude),
+      longitude: Number(req.body?.longitude),
+      radiusMeters: Number(req.body?.radiusMeters)
+    });
+    res.status(200).json({ config });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to save geofence config';
+    res.status(500).json({ error: message });
   }
 });
 
@@ -665,6 +722,29 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       border: 1px solid rgba(255, 255, 255, 0.2);
       white-space: nowrap;
     }
+    .geofence-event-banner {
+      position: fixed;
+      top: 76px;
+      right: 12px;
+      z-index: 1200;
+      max-width: min(420px, calc(100vw - 24px));
+      background: rgba(15, 23, 42, .96);
+      color: #ffffff;
+      font-weight: 900;
+      padding: 11px 14px;
+      border-radius: 10px;
+      box-shadow: 0 8px 28px rgba(0,0,0,.38);
+      border: 1px solid rgba(255,255,255,.14);
+      display: none;
+    }
+    .geofence-event-banner.exit {
+      border-color: rgba(248,113,113,.55);
+      color: #fecaca;
+    }
+    .geofence-event-banner.entry {
+      border-color: rgba(34,197,94,.55);
+      color: #bbf7d0;
+    }
 
     @keyframes blink {
       0% { opacity: 1; }
@@ -711,6 +791,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 <body>
   <div id="map"></div>
   <div id="deviationAlertBanner" class="deviation-banner">⚠️ ALERT: Driver deviated from the planned route!</div>
+  <div id="geofenceEventBanner" class="geofence-event-banner"></div>
   <div class="topbar">
     <div>
       <div class="title">Factory Talk Live Map</div>
@@ -746,6 +827,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
   <script>
     const userId = ${JSON.stringify(userId)};
     const map = L.map('map').setView([21.1702, 72.8311], 13);
@@ -827,6 +909,16 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
+        hour12: true,
+        hourCycle: 'h12'
+      });
+    }
+
+    function formatEventTime(timestamp) {
+      if (!timestamp) return '';
+      return new Date(Number(timestamp)).toLocaleTimeString(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
         hour12: true,
         hourCycle: 'h12'
       });
@@ -2168,6 +2260,26 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         document.getElementById('serverText').textContent = 'Reconnecting';
         document.getElementById('summary').textContent = 'Server sleeping/offline, retrying...';
       }
+    }
+
+    const socket = io();
+    socket.on('geofence_event', showGeofenceEvent);
+
+    function showGeofenceEvent(event) {
+      const banner = document.getElementById('geofenceEventBanner');
+      if (!banner || !event) return;
+      const name = escapeText(event.name || 'Driver');
+      const time = escapeText(formatEventTime(event.timestamp));
+      const message = event.eventType === 'ENTRY'
+        ? name + ' returned to factory at ' + time
+        : name + ' exited factory at ' + time;
+      banner.textContent = message;
+      banner.className = 'geofence-event-banner ' + (event.eventType === 'ENTRY' ? 'entry' : 'exit');
+      banner.style.display = 'block';
+      clearTimeout(window.__geofenceEventTimer);
+      window.__geofenceEventTimer = setTimeout(() => {
+        banner.style.display = 'none';
+      }, 7000);
     }
 
     if (userId) {

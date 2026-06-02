@@ -8,6 +8,9 @@ import { requestFloor, releaseFloor, getFloorState, checkFloorTimeouts } from '.
 import { sendBroadcastWakeUp } from '../services/fcmService';
 import { logTalkStart, logTalkEnd } from '../services/logService';
 import { persistLocationHistory } from '../services/locationHistoryService';
+import { getGeofenceConfig } from '../geofence/geofenceConfigService';
+import { persistGeofenceEvent } from '../geofence/geofenceHistoryService';
+import { evaluateGeofenceTransition } from '../geofence/geofenceService';
 import { buildAudioRelayEvent } from './audioRelay';
 import { buildAcceptedLocation } from './locationTelemetry';
 
@@ -240,6 +243,18 @@ export function setupSocketHandler(io: Server) {
       void persistLocationHistory(trackedLocation).catch((error) => {
         console.error('Failed to persist location history:', error);
       });
+      void getGeofenceConfig()
+        .then((config) => evaluateGeofenceTransition(trackedLocation, config))
+        .then((geofenceEvent) => {
+          if (!geofenceEvent) return;
+          io.emit('geofence_event', geofenceEvent);
+          return persistGeofenceEvent(geofenceEvent).catch((error) => {
+            console.error('Failed to persist geofence event:', error);
+          });
+        })
+        .catch((error) => {
+          console.error('Failed to evaluate geofence event:', error);
+        });
 
       io.emit('user_location_updated', trackedLocation);
     });
