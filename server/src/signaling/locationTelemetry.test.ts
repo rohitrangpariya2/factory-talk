@@ -68,4 +68,31 @@ describe('location telemetry normalization', () => {
     expect(accepted.bearing).toBeUndefined();
     expect(accepted.bearingAccuracyDegrees).toBeUndefined();
   });
+
+  test('hides bearing when fix is stale', () => {
+    const accepted = buildAcceptedLocation(
+      {
+        ...basePayload,
+        receivedAt: 1_700_000_180_000,
+        locationUpdatedAt: 1_700_000_000_000
+      },
+      undefined,
+      18.4,
+      92,
+      12
+    );
+
+    expect(accepted.bearing).toBeUndefined();
+    expect(accepted.bearingAccuracyDegrees).toBeUndefined();
+  });
+
+  test('hides bearing when bearing or accuracy is invalid', () => {
+    const nanBearing = buildAcceptedLocation(basePayload, undefined, 18.4, Number.NaN, 12);
+    const negativeAccuracy = buildAcceptedLocation(basePayload, undefined, 18.4, 92, -1);
+
+    expect(nanBearing.bearing).toBeUndefined();
+    expect(nanBearing.bearingAccuracyDegrees).toBeUndefined();
+    expect(negativeAccuracy.bearing).toBeUndefined();
+    expect(negativeAccuracy.bearingAccuracyDegrees).toBeUndefined();
+  });
 });

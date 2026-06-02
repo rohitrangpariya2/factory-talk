@@ -156,6 +156,33 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       gap: 10px;
       padding: 10px 12px;
     }
+    .map-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .follow-button {
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
+      padding: 8px 11px;
+      color: #ffffff;
+      background: rgba(29,155,240,.18);
+      font-weight: 900;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 4px 14px rgba(0,0,0,.18);
+    }
+    .follow-button.paused {
+      background: rgba(245,158,11,.18);
+      color: #fde68a;
+      border-color: rgba(245,158,11,.35);
+    }
+    .follow-button.off {
+      background: rgba(148,163,184,.14);
+      color: #cbd5e1;
+    }
     .panel {
       left: 12px;
       right: 12px;
@@ -387,32 +414,50 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     .vehicle-body {
       position: absolute;
       left: 16px;
-      top: 12px;
+      top: 8px;
       width: 40px;
-      height: 34px;
-      border-radius: 10px 10px 8px 8px;
-      background: var(--vehicle-color);
-      border: 4px solid #ffffff;
+      height: 42px;
+      border-radius: 18px 18px 12px 12px;
+      background: linear-gradient(180deg, #ffffff 0 13%, var(--vehicle-color) 13% 100%);
+      border: 3px solid #ffffff;
       box-shadow: 0 8px 24px rgba(0,0,0,.45), 0 0 0 3px rgba(15,23,42,.85);
       display: grid;
       place-items: center;
       color: #ffffff;
-      font-size: 17px;
-      font-weight: 900;
-      line-height: 1;
       transform-origin: 50% 50%;
       transition: transform .35s ease-out;
     }
-    .vehicle-body::before {
+    .vehicle-arrow {
       content: '';
       position: absolute;
-      top: -9px;
-      left: 11px;
-      border-left: 9px solid transparent;
-      border-right: 9px solid transparent;
-      border-bottom: 10px solid #ffffff;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      border-left: 12px solid transparent;
+      border-right: 12px solid transparent;
+      border-bottom: 15px solid #ffffff;
+      filter: drop-shadow(0 -1px 1px rgba(15,23,42,.35));
     }
-    .vehicle-body.hidden-bearing::before {
+    .vehicle-cabin {
+      position: absolute;
+      top: 7px;
+      left: 10px;
+      width: 20px;
+      height: 12px;
+      border-radius: 7px 7px 4px 4px;
+      background: rgba(15,23,42,.72);
+      border: 1px solid rgba(255,255,255,.85);
+    }
+    .vehicle-tail {
+      position: absolute;
+      bottom: 6px;
+      left: 9px;
+      right: 9px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.86);
+    }
+    .vehicle-body.hidden-bearing .vehicle-arrow {
       display: none;
     }
     .driver-label {
@@ -600,7 +645,10 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       <div class="title">Factory Talk Live Map</div>
       <div class="muted" id="summary">Waiting for phones...</div>
     </div>
-    <div class="status"><span class="dot" id="serverDot"></span><span id="serverText">Connecting</span></div>
+    <div class="map-actions">
+      <button type="button" class="follow-button" id="followLiveButton" onclick="toggleFollowLive()">Follow Live ON</button>
+      <div class="status"><span class="dot" id="serverDot"></span><span id="serverText">Connecting</span></div>
+    </div>
   </div>
   <div id="tripDrawer" class="panel trip-drawer collapsed">
     <button type="button" class="trip-drawer-handle" id="tripDrawerHandle" onclick="setTripDrawerExpanded(!tripDrawerExpanded)" aria-expanded="false">
@@ -639,6 +687,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     ${buildStopMarkersScript()}
     const markers = new Map();
     const markerBearings = new Map();
+    const markerPositions = new Map();
     const circles = new Map();
     const historyLines = new Map();
     const historyLineCasings = new Map();
@@ -668,6 +717,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     let selectedTimelineUserId = userId || '';
     let tripDrawerExpanded = false;
     let firstFix = true;
+    let followLiveEnabled = true;
+    let followLivePaused = false;
+    let suppressFollowPause = false;
 
     function escapeText(value) {
       return String(value || '').replace(/[&<>"']/g, (char) => ({
@@ -859,6 +911,20 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return ((bearing % 360) + 360) % 360;
     }
 
+    function movementBearing(previous, next) {
+      if (!previous || !next) return null;
+      const distance = distanceMeters(previous, next);
+      if (!Number.isFinite(distance) || distance < 4) return null;
+      const lat1 = Number(previous.latitude) * Math.PI / 180;
+      const lat2 = Number(next.latitude) * Math.PI / 180;
+      const deltaLon = (Number(next.longitude) - Number(previous.longitude)) * Math.PI / 180;
+      const y = Math.sin(deltaLon) * Math.cos(lat2);
+      const x = Math.cos(lat1) * Math.sin(lat2) -
+        Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon);
+      const bearing = Math.atan2(y, x) * 180 / Math.PI;
+      return ((bearing % 360) + 360) % 360;
+    }
+
     function smoothBearing(key, nextBearing) {
       const previous = markerBearings.get(key);
       if (!Number.isFinite(previous)) {
@@ -886,7 +952,11 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         popupAnchor: [0, -58],
         html: '<div class="vehicle-marker" style="--vehicle-color:' + color + '">' +
           '<div class="vehicle-pulse"></div>' +
-          '<div class="' + bodyClass + '" style="' + rotationStyle + '">D</div>' +
+          '<div class="' + bodyClass + '" style="' + rotationStyle + '">' +
+            '<span class="vehicle-arrow"></span>' +
+            '<span class="vehicle-cabin"></span>' +
+            '<span class="vehicle-tail"></span>' +
+          '</div>' +
           '<div class="driver-label">' + name + '</div>' +
         '</div>'
       });
@@ -1038,9 +1108,12 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const key = location.userId;
       const latLng = [location.latitude, location.longitude];
       const status = statusFor(location);
+      const previousPosition = markerPositions.get(key);
       const acceptedBearing = reliableBearing(location);
-      const displayBearing = acceptedBearing === null ? undefined : smoothBearing(key, acceptedBearing);
-      if (acceptedBearing === null) markerBearings.delete(key);
+      const fallbackBearing = acceptedBearing === null ? movementBearing(previousPosition, location) : null;
+      const directionBearing = acceptedBearing !== null ? acceptedBearing : fallbackBearing;
+      const displayBearing = directionBearing === null ? undefined : smoothBearing(key, directionBearing);
+      if (directionBearing === null) markerBearings.delete(key);
       const markerLocation = { ...location, displayBearing };
       if (!markers.has(key)) {
         markers.set(key, L.marker(latLng, { icon: makeIcon(markerLocation, status), zIndexOffset: 1000 }).addTo(map));
@@ -1049,6 +1122,12 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       marker.setLatLng(latLng);
       marker.setIcon(makeIcon(markerLocation, status));
       marker.bindPopup(popupHtml(location));
+      markerPositions.set(key, {
+        latitude: Number(location.latitude),
+        longitude: Number(location.longitude),
+        locationUpdatedAt: Number(location.locationUpdatedAt || 0)
+      });
+      followSelectedDriver(location);
 
       const accuracy = Number(location.accuracy || 0);
       if (accuracy > 0 && accuracy < 5000) {
@@ -1067,6 +1146,64 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         circle.setStyle({ color: status.color, fillColor: status.color });
       }
     }
+
+    function selectedFollowId() {
+      return selectedTimelineUserId || userId || '';
+    }
+
+    function updateFollowButton() {
+      const button = document.getElementById('followLiveButton');
+      if (!button) return;
+      button.classList.toggle('off', !followLiveEnabled);
+      button.classList.toggle('paused', followLiveEnabled && followLivePaused);
+      button.textContent = !followLiveEnabled
+        ? 'Follow Live OFF'
+        : followLivePaused
+          ? 'Resume Follow'
+          : 'Follow Live ON';
+    }
+
+    function setFollowLive(enabled, paused) {
+      followLiveEnabled = !!enabled;
+      followLivePaused = !!paused;
+      updateFollowButton();
+      if (followLiveEnabled && !followLivePaused) {
+        const marker = markers.get(selectedFollowId());
+        if (marker) {
+          suppressFollowPause = true;
+          map.panTo(marker.getLatLng(), { animate: true, duration: 0.45 });
+          setTimeout(() => { suppressFollowPause = false; }, 650);
+        }
+      }
+    }
+
+    function pauseFollowLive() {
+      if (!followLiveEnabled || suppressFollowPause) return;
+      followLivePaused = true;
+      updateFollowButton();
+    }
+
+    function toggleFollowLive() {
+      if (!followLiveEnabled) {
+        setFollowLive(true, false);
+      } else if (followLivePaused) {
+        setFollowLive(true, false);
+      } else {
+        setFollowLive(false, false);
+      }
+    }
+
+    function followSelectedDriver(location) {
+      if (!followLiveEnabled || followLivePaused) return;
+      if (selectedFollowId() && location.userId !== selectedFollowId()) return;
+      if (selectedTripIndex >= 0 && !forceLiveMapMode) return;
+      suppressFollowPause = true;
+      map.panTo([location.latitude, location.longitude], { animate: true, duration: 0.45 });
+      setTimeout(() => { suppressFollowPause = false; }, 650);
+    }
+
+    map.on('dragstart', pauseFollowLive);
+    map.on('zoomstart', pauseFollowLive);
 
     function setLayerVisible(layer, visible) {
       if (!layer) return;
@@ -1889,6 +2026,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       setLiveLayersVisible(true);
       const marker = markers.get(id);
       if (marker) {
+        setFollowLive(true, false);
         map.setView(marker.getLatLng(), 17, { animate: true });
         marker.openPopup();
       }
@@ -1949,7 +2087,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         renderList(locations, historyCounts, historyPoints);
         if (firstFix) {
           const selected = locations.find((item) => item.userId === userId) || locations[0];
+          suppressFollowPause = true;
           map.setView([selected.latitude, selected.longitude], 17);
+          setTimeout(() => { suppressFollowPause = false; }, 650);
           firstFix = false;
         }
       } catch (error) {

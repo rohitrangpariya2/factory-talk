@@ -14,10 +14,27 @@ describe('live tracking map presentation', () => {
 
   test('rotates vehicle marker with smoothed reliable bearing only', () => {
     expect(indexSource).toContain('markerBearings');
+    expect(indexSource).toContain('markerPositions');
     expect(indexSource).toContain('function smoothBearing');
     expect(indexSource).toContain('function reliableBearing');
+    expect(indexSource).toContain('function movementBearing');
     expect(indexSource).toContain('rotate(');
     expect(indexSource).toContain('vehicle-body hidden-bearing');
+  });
+
+  test('uses an arrow vehicle marker for direction', () => {
+    expect(indexSource).toContain('vehicle-arrow');
+    expect(indexSource).toContain('vehicle-cabin');
+    expect(indexSource).toContain('vehicle-tail');
+  });
+
+  test('adds follow live controls with manual map pause and resume', () => {
+    expect(indexSource).toContain('id="followLiveButton"');
+    expect(indexSource).toContain('function setFollowLive');
+    expect(indexSource).toContain('function pauseFollowLive');
+    expect(indexSource).toContain('function followSelectedDriver');
+    expect(indexSource).toContain("map.on('dragstart'");
+    expect(indexSource).toContain("map.on('zoomstart'");
   });
 
   test('renders live route as a thick cased professional line', () => {
