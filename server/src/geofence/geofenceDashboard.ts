@@ -20,7 +20,7 @@ export function buildGeofenceHistoryDashboardHtml(): string {
       padding: 12px;
     }
     .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-    .config-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; align-items: end; }
+    .config-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; align-items: end; }
     label { display: grid; gap: 4px; color: #cbd5e1; font-size: 12px; font-weight: 800; }
     input, button {
       min-height: 38px;
@@ -56,13 +56,14 @@ export function buildGeofenceHistoryDashboardHtml(): string {
     </div>
 
     <section class="panel">
-      <div class="config-grid">
-        <label>Factory latitude <input id="configLat" type="number" step="0.000001" /></label>
-        <label>Factory longitude <input id="configLng" type="number" step="0.000001" /></label>
-        <label>Radius meters <input id="configRadius" type="number" min="20" value="100" /></label>
-        <button type="button" onclick="saveConfig()">Save Geofence</button>
-        <div class="status" id="configStatus">Loading config...</div>
-      </div>
+        <div class="config-grid">
+          <label>Factory latitude <input id="configLat" type="number" step="0.000001" /></label>
+          <label>Factory longitude <input id="configLng" type="number" step="0.000001" /></label>
+          <label>Radius meters <input id="configRadius" type="number" min="20" value="100" /></label>
+          <label>ADMIN_SECRET <input id="adminSecretInput" type="password" autocomplete="current-password" /></label>
+          <button type="button" onclick="saveConfig()">Save Geofence</button>
+          <div class="status" id="configStatus">Loading config...</div>
+        </div>
     </section>
 
     <section class="panel">
@@ -118,9 +119,10 @@ export function buildGeofenceHistoryDashboardHtml(): string {
     }
     async function saveConfig() {
       document.getElementById('configStatus').textContent = 'Saving...';
+      const adminSecret = document.getElementById('adminSecretInput').value;
       const response = await fetch('/geofence-config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
         body: JSON.stringify({
           latitude: Number(document.getElementById('configLat').value),
           longitude: Number(document.getElementById('configLng').value),

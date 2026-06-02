@@ -11,5 +11,6 @@ export const env = {
   turnServer: process.env.TURN_SERVER,
   turnUsername: process.env.TURN_USERNAME,
   turnPassword: process.env.TURN_PASSWORD,
-  allowDeviceAuth: process.env.ALLOW_DEVICE_AUTH === 'true'
+  allowDeviceAuth: process.env.ALLOW_DEVICE_AUTH === 'true',
+  adminSecret: process.env.ADMIN_SECRET
 };

@@ -8,6 +8,7 @@ import './config/firebase'; // Initialize Firebase
 import authRoutes from './api/routes/auth';
 import userRoutes from './api/routes/users';
 import channelRoutes from './api/routes/channels';
+import { createRateLimiter, requireAdminSecret as requireAdminSecretMiddleware } from './api/middleware/simpleSecurity';
 import { buildFactoryZoneScript } from './map/factoryZone';
 import {
   buildOsrmMatchUrl,
@@ -37,6 +38,9 @@ const server = http.createServer(app);
 const roadMatchCache = new Map<string, { expiresAt: number; result: RoadMatchResult }>();
 const ROAD_MATCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const ROAD_MATCH_CACHE_MAX_ENTRIES = 400;
+const roadProxyRateLimiter = createRateLimiter({ windowMs: 60 * 1000, maxRequests: 60 });
+const geofenceConfigRateLimiter = createRateLimiter({ windowMs: 60 * 1000, maxRequests: 20 });
+const requireAdminSecret = requireAdminSecretMiddleware(() => env.adminSecret);
 
 function escapeHtml(value: string): string {
   return value
@@ -92,7 +96,7 @@ app.get('/locations/history/saved', async (req, res) => {
   }
 });
 
-app.get('/road-route', async (req, res) => {
+app.get('/road-route', roadProxyRateLimiter, async (req, res) => {
   try {
     const rawCoordinates = typeof req.query.coordinates === 'string' ? req.query.coordinates : '';
     const coordinates = normalizeRoadRouteCoordinates(rawCoordinates);
@@ -230,8 +234,8 @@ async function roadMatchHandler(req: express.Request, res: express.Response): Pr
   }
 }
 
-app.get('/road-match', roadMatchHandler);
-app.post('/road-match', roadMatchHandler);
+app.get('/road-match', roadProxyRateLimiter, roadMatchHandler);
+app.post('/road-match', roadProxyRateLimiter, roadMatchHandler);
 
 app.get('/delivery-history', (_req, res) => {
   res.setHeader(
@@ -334,7 +338,7 @@ app.get('/geofence-history/events', async (req, res) => {
   }
 });
 
-app.get('/geofence-config', async (_req, res) => {
+app.get('/geofence-config', geofenceConfigRateLimiter, async (_req, res) => {
   try {
     const config = await getGeofenceConfig();
     res.status(200).json({ config });
@@ -343,7 +347,7 @@ app.get('/geofence-config', async (_req, res) => {
   }
 });
 
-app.post('/geofence-config', async (req, res) => {
+app.post('/geofence-config', geofenceConfigRateLimiter, requireAdminSecret, async (req, res) => {
   try {
     const config = await saveGeofenceConfig({
       latitude: Number(req.body?.latitude),
