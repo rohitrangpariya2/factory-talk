@@ -11,8 +11,18 @@ describe('factory map zone', () => {
     const script = buildFactoryZoneScript();
 
     expect(script).toContain('Factory Zone');
-    expect(script).toContain('radius: 20');
+    expect(script).toContain('fallbackFactoryZone');
+    expect(script).toContain('radiusMeters: 20');
     expect(script).toContain('21.259843683720433');
     expect(script).toContain('72.9386185449755');
+  });
+
+  test('loads dynamic geofence config and keeps static factory zone as fallback', () => {
+    const script = buildFactoryZoneScript();
+
+    expect(script).toContain("fetch('/geofence-config'");
+    expect(script).toContain('factoryZone = { ...fallbackFactoryZone }');
+    expect(script).toContain('factoryZoneCircle.setRadius(factoryZone.radiusMeters)');
+    expect(script).toContain('factoryZoneCenterMarker.setLatLng(factoryLatLng)');
   });
 });

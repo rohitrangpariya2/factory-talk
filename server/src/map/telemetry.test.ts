@@ -38,11 +38,27 @@ describe('factory telemetry map script', () => {
     expect(indexSource).toContain('Inside factory');
     expect(indexSource).toContain('Outside factory');
     expect(indexSource).toContain('Current speed');
+    expect(indexSource).toContain('const fallbackSpeed = Number(location.motionStatus && location.motionStatus.speedKmh)');
+    expect(indexSource).toContain("location.motionStatus.state === 'moving'");
     expect(indexSource).toContain('Trip status');
     expect(indexSource).toContain('Today km');
     expect(indexSource).toContain('Trip time');
     expect(indexSource).toContain('Stops');
     expect(indexSource).toContain('-- km/h');
     expect(indexSource).toContain('km/h');
+  });
+
+  test('current speed prefers validated speed then moving fallback speed', () => {
+    expect(indexSource).toContain("if (Number.isFinite(speed) && speed >= 0) return Math.round(speed) + ' km/h';");
+    expect(indexSource).toContain("return Math.round(fallbackSpeed) + ' km/h';");
+    expect(indexSource).toContain("return '-- km/h';");
+  });
+
+  test('factory badge uses the shared dynamic factory zone config', () => {
+    expect(indexSource).toContain('function factoryStatus(location)');
+    expect(indexSource).toContain('return isInsideFactoryZone(location)');
+    expect(indexSource).toContain('function isInsideFactoryZone(point)');
+    expect(indexSource).toContain('factoryZone.radiusMeters');
+    expect(indexSource).toContain('${buildFactoryZoneScript()}');
   });
 });

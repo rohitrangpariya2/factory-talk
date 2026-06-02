@@ -1064,8 +1064,19 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
     function reliableSpeedText(location) {
       const speed = Number(location.speedKmh);
-      if (!Number.isFinite(speed) || speed < 0) return '-- km/h';
-      return Math.round(speed) + ' km/h';
+      if (Number.isFinite(speed) && speed >= 0) return Math.round(speed) + ' km/h';
+
+      const fallbackSpeed = Number(location.motionStatus && location.motionStatus.speedKmh);
+      if (
+        location.motionStatus &&
+        location.motionStatus.state === 'moving' &&
+        Number.isFinite(fallbackSpeed) &&
+        fallbackSpeed >= 0
+      ) {
+        return Math.round(fallbackSpeed) + ' km/h';
+      }
+
+      return '-- km/h';
     }
 
     function userHistoryFor(location, historyPoints) {
