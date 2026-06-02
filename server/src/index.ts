@@ -76,12 +76,36 @@ app.get('/road-route', async (req, res) => {
       return;
     }
 
-    const routeResponse = await fetch(buildOsrmRouteUrl(coordinates), {
+    const targetUrl = buildOsrmRouteUrl(coordinates);
+    let routeResponse = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'FactoryTalk/1.0 (https://factory-talk-server.onrender.com)'
       }
     });
-    const body = await routeResponse.text();
+
+    let body = await routeResponse.text();
+
+    if (routeResponse.status === 400) {
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed.code === 'NoSegment') {
+          console.log('[road-route] OSRM returned NoSegment, retrying without radiuses constraint...');
+          const fallbackUrl = targetUrl.replace(/&radiuses=[^&]*/, '');
+          const fallbackResponse = await fetch(fallbackUrl, {
+            headers: {
+              'User-Agent': 'FactoryTalk/1.0 (https://factory-talk-server.onrender.com)'
+            }
+          });
+          if (fallbackResponse.ok) {
+            routeResponse = fallbackResponse;
+            body = await fallbackResponse.text();
+          }
+        }
+      } catch (e) {
+        // Fallback failed or json parsing failed, return original body
+      }
+    }
+
     res.setHeader('Cache-Control', 'private, max-age=20');
     res
       .status(routeResponse.status)
