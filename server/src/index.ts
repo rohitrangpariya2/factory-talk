@@ -367,21 +367,75 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       font-weight: 900;
       margin-top: 2px;
     }
-    .marker-pin {
-      width: 18px;
-      height: 18px;
-      border-radius: 50% 50% 50% 0;
-      transform: rotate(-45deg);
-      border: 3px solid white;
-      box-shadow: 0 2px 10px rgba(0,0,0,.35);
+    .vehicle-marker {
+      position: relative;
+      width: 72px;
+      height: 64px;
+      pointer-events: none;
     }
-    .marker-pin span {
-      display: block;
-      width: 6px;
-      height: 6px;
-      margin: 3px;
+    .vehicle-pulse {
+      position: absolute;
+      left: 22px;
+      top: 22px;
+      width: 28px;
+      height: 28px;
       border-radius: 50%;
-      background: white;
+      background: rgba(34, 197, 94, .28);
+      border: 2px solid rgba(255,255,255,.85);
+      animation: livePulse 1.7s ease-out infinite;
+    }
+    .vehicle-body {
+      position: absolute;
+      left: 16px;
+      top: 12px;
+      width: 40px;
+      height: 34px;
+      border-radius: 10px 10px 8px 8px;
+      background: var(--vehicle-color);
+      border: 4px solid #ffffff;
+      box-shadow: 0 8px 24px rgba(0,0,0,.45), 0 0 0 3px rgba(15,23,42,.85);
+      display: grid;
+      place-items: center;
+      color: #ffffff;
+      font-size: 17px;
+      font-weight: 900;
+      line-height: 1;
+      transform-origin: 50% 50%;
+      transition: transform .35s ease-out;
+    }
+    .vehicle-body::before {
+      content: '';
+      position: absolute;
+      top: -9px;
+      left: 11px;
+      border-left: 9px solid transparent;
+      border-right: 9px solid transparent;
+      border-bottom: 10px solid #ffffff;
+    }
+    .vehicle-body.hidden-bearing::before {
+      display: none;
+    }
+    .driver-label {
+      position: absolute;
+      left: 50%;
+      bottom: -6px;
+      transform: translateX(-50%);
+      max-width: 112px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, .94);
+      border: 1px solid rgba(255,255,255,.82);
+      box-shadow: 0 4px 14px rgba(0,0,0,.32);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 900;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    @keyframes livePulse {
+      0% { transform: scale(.65); opacity: .9; }
+      100% { transform: scale(2.25); opacity: 0; }
     }
     @media (min-width: 720px) {
       .topbar { right: auto; width: 390px; }
@@ -584,8 +638,10 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     ${buildRoadTrailScript()}
     ${buildStopMarkersScript()}
     const markers = new Map();
+    const markerBearings = new Map();
     const circles = new Map();
     const historyLines = new Map();
+    const historyLineCasings = new Map();
     const tripLayers = L.layerGroup().addTo(map);
     const tripRouteCache = new Map();
     const liveRouteInflight = new Set();
@@ -601,6 +657,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const LIVE_TRAIL_MAX_POINTS = 25;
     const LIVE_TRAIL_MAX_AGE_MS = 10 * 60 * 1000;
     const LIVE_TRAIL_COLOR = '#2563eb';
+    const LIVE_TRAIL_OUTLINE_COLOR = '#ffffff';
     let savedHistory = [];
     let lastHistoryPoints = [];
     let currentTrips = [];
@@ -646,7 +703,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         month: 'short',
         hour: '2-digit',
         minute: '2-digit',
-        second: '2-digit'
+        second: '2-digit',
+        hour12: true,
+        hourCycle: 'h12'
       });
     }
 
@@ -719,12 +778,12 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return (meters / 1000).toFixed(2) + ' km';
     }
 
-    const MAX_GPS_JUMP_SPEED_KMH = 110;
-    const MAX_GPS_JUMP_METERS = 450;
+    const MAX_GPS_JUMP_SPEED_KMH = 95;
+    const MAX_GPS_JUMP_METERS = 260;
     const MIN_GPS_JUMP_INTERVAL_MS = 4000;
-    const MAX_FILTERED_ACCURACY_METERS = 120;
-    const ROUTE_SEGMENT_BREAK_METERS = 260;
-    const ROUTE_SEGMENT_BREAK_SPEED_KMH = 85;
+    const MAX_FILTERED_ACCURACY_METERS = 100;
+    const ROUTE_SEGMENT_BREAK_METERS = 220;
+    const ROUTE_SEGMENT_BREAK_SPEED_KMH = 75;
     const ROUTE_SEGMENT_BREAK_GAP_MS = 90_000;
 
     function filterStablePoints(points) {
@@ -791,13 +850,45 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return Math.round(kmh) + ' km/h';
     }
 
-    function makeIcon(color) {
+    function reliableBearing(location) {
+      const bearing = Number(location.bearing);
+      const accuracy = Number(location.bearingAccuracyDegrees);
+      if (!Number.isFinite(bearing) || !Number.isFinite(accuracy)) return null;
+      if (accuracy < 0 || accuracy > 45) return null;
+      if (freshnessMs(location) > 120000) return null;
+      return ((bearing % 360) + 360) % 360;
+    }
+
+    function smoothBearing(key, nextBearing) {
+      const previous = markerBearings.get(key);
+      if (!Number.isFinite(previous)) {
+        markerBearings.set(key, nextBearing);
+        return nextBearing;
+      }
+      const delta = ((nextBearing - previous + 540) % 360) - 180;
+      if (Math.abs(delta) < 4) return previous;
+      const smoothed = ((previous + delta * 0.35) % 360 + 360) % 360;
+      markerBearings.set(key, smoothed);
+      return smoothed;
+    }
+
+    function makeIcon(location, status) {
+      const color = status.color;
+      const name = escapeText(location.name || 'Driver');
+      const bearing = Number(location.displayBearing);
+      const hasBearing = Number.isFinite(bearing);
+      const bodyClass = hasBearing ? 'vehicle-body' : 'vehicle-body hidden-bearing';
+      const rotationStyle = hasBearing ? 'transform: rotate(' + bearing.toFixed(1) + 'deg);' : '';
       return L.divIcon({
         className: '',
-        iconSize: [24, 24],
-        iconAnchor: [12, 24],
-        popupAnchor: [0, -24],
-        html: '<div class="marker-pin" style="background:' + color + '"><span></span></div>'
+        iconSize: [72, 64],
+        iconAnchor: [36, 56],
+        popupAnchor: [0, -58],
+        html: '<div class="vehicle-marker" style="--vehicle-color:' + color + '">' +
+          '<div class="vehicle-pulse"></div>' +
+          '<div class="' + bodyClass + '" style="' + rotationStyle + '">D</div>' +
+          '<div class="driver-label">' + name + '</div>' +
+        '</div>'
       });
     }
 
@@ -860,18 +951,29 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         );
         const latLngs = rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs;
         const color = LIVE_TRAIL_COLOR;
+        if (!historyLineCasings.has(key)) {
+          historyLineCasings.set(key, L.polyline(latLngs, {
+            color: LIVE_TRAIL_OUTLINE_COLOR,
+            weight: 8,
+            opacity: 0.92,
+            lineCap: 'round',
+            lineJoin: 'round'
+          }).addTo(map));
+        } else {
+          historyLineCasings.get(key).setLatLngs(latLngs);
+          historyLineCasings.get(key).setStyle({ color: LIVE_TRAIL_OUTLINE_COLOR, weight: 8, opacity: 0.92 });
+        }
         if (!historyLines.has(key)) {
           historyLines.set(key, L.polyline(latLngs, {
             color,
-            weight: 2,
-            opacity: 0.45,
+            weight: 5,
+            opacity: 0.95,
             lineCap: 'round',
-            lineJoin: 'round',
-            dashArray: '2 8'
+            lineJoin: 'round'
           }).addTo(map));
         } else {
           historyLines.get(key).setLatLngs(latLngs);
-          historyLines.get(key).setStyle({ color, weight: 2, opacity: 0.45, dashArray: '2 8' });
+          historyLines.get(key).setStyle({ color, weight: 5, opacity: 0.95 });
         }
 
         segments.forEach((segmentPoints, segmentIndex) => {
@@ -891,6 +993,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
               if (roadLatLngs.length > 1) {
                 tripRouteCache.set(routeCacheKey, roadLatLngs);
                 rawSegmentLatLngs[segmentIndex] = roadLatLngs;
+                const casing = historyLineCasings.get(key);
+                if (casing) casing.setLatLngs(rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs);
                 const line = historyLines.get(key);
                 if (line) line.setLatLngs(rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs);
               }
@@ -906,6 +1010,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
       historyLines.forEach((line, key) => {
         if (!grouped.has(key)) {
+          const casing = historyLineCasings.get(key);
+          if (casing) map.removeLayer(casing);
+          historyLineCasings.delete(key);
           map.removeLayer(line);
           historyLines.delete(key);
         }
@@ -931,12 +1038,16 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const key = location.userId;
       const latLng = [location.latitude, location.longitude];
       const status = statusFor(location);
+      const acceptedBearing = reliableBearing(location);
+      const displayBearing = acceptedBearing === null ? undefined : smoothBearing(key, acceptedBearing);
+      if (acceptedBearing === null) markerBearings.delete(key);
+      const markerLocation = { ...location, displayBearing };
       if (!markers.has(key)) {
-        markers.set(key, L.marker(latLng, { icon: makeIcon(status.color) }).addTo(map));
+        markers.set(key, L.marker(latLng, { icon: makeIcon(markerLocation, status), zIndexOffset: 1000 }).addTo(map));
       }
       const marker = markers.get(key);
       marker.setLatLng(latLng);
-      marker.setIcon(makeIcon(status.color));
+      marker.setIcon(makeIcon(markerLocation, status));
       marker.bindPopup(popupHtml(location));
 
       const accuracy = Number(location.accuracy || 0);
@@ -967,6 +1078,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
 
     function setLiveLayersVisible(visible) {
+      historyLineCasings.forEach((line) => setLayerVisible(line, visible));
       markers.forEach((marker) => setLayerVisible(marker, visible));
       circles.forEach((circle) => setLayerVisible(circle, visible));
       historyLines.forEach((line) => setLayerVisible(line, visible));
@@ -974,6 +1086,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     }
 
     function setSelectedHistoryLineVisible(visible) {
+      const casing = historyLineCasings.get(selectedTimelineUserId);
+      if (casing) setLayerVisible(casing, visible);
       const line = historyLines.get(selectedTimelineUserId);
       if (line) setLayerVisible(line, visible);
     }

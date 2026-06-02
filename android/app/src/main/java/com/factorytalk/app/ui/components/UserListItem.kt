@@ -166,6 +166,6 @@ fun getRoleColor(role: UserRole): Color {
 
 private fun formatTime(timeMs: Long): String {
     if (timeMs == 0L) return "Never"
-    val sdf = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+    val sdf = SimpleDateFormat("MMM dd, hh:mm a", Locale.getDefault())
     return sdf.format(Date(timeMs))
 }

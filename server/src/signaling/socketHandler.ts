@@ -9,6 +9,7 @@ import { sendBroadcastWakeUp } from '../services/fcmService';
 import { logTalkStart, logTalkEnd } from '../services/logService';
 import { persistLocationHistory } from '../services/locationHistoryService';
 import { buildAudioRelayEvent } from './audioRelay';
+import { buildAcceptedLocation } from './locationTelemetry';
 
 let reminderSchedule: { onTime: string; offTime: string } | null = null;
 const busyDisconnectGraceTimers = new Map<string, NodeJS.Timeout>();
@@ -23,6 +24,8 @@ type TrackedLocation = {
   receivedAt?: number;
   locationUpdatedAt: number;
   speedKmh?: number;
+  bearing?: number;
+  bearingAccuracyDegrees?: number;
   isCallActive?: boolean;
 };
 
@@ -204,6 +207,8 @@ export function setupSocketHandler(io: Server) {
       const accuracy = Number(payload?.accuracy);
       const locationTime = Number(payload?.locationTime);
       const speedKmh = payload?.speedKmh !== undefined ? Number(payload.speedKmh) : undefined;
+      const bearing = payload?.bearing !== undefined ? Number(payload.bearing) : undefined;
+      const bearingAccuracyDegrees = payload?.bearingAccuracyDegrees !== undefined ? Number(payload.bearingAccuracyDegrees) : undefined;
       const isCallActive = payload?.isCallActive !== undefined ? Boolean(payload.isCallActive) : undefined;
 
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
@@ -218,7 +223,7 @@ export function setupSocketHandler(io: Server) {
       user.latitude = latitude;
       user.longitude = longitude;
       user.locationUpdatedAt = fixTime;
-      const trackedLocation: TrackedLocation = {
+      const trackedLocation = buildAcceptedLocation({
         userId: user.userId,
         name: user.userName,
         role: user.role,
@@ -228,9 +233,8 @@ export function setupSocketHandler(io: Server) {
         isBusy: !!user.isBusy,
         receivedAt: now,
         locationUpdatedAt: user.locationUpdatedAt,
-        speedKmh,
         isCallActive
-      };
+      }, latestLocations.get(user.userId), speedKmh, bearing, bearingAccuracyDegrees) as TrackedLocation;
       latestLocations.set(user.userId, trackedLocation);
       appendLocationHistory(trackedLocation);
       void persistLocationHistory(trackedLocation).catch((error) => {

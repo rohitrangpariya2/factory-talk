@@ -310,6 +310,8 @@ class SignalingClient(
         locationTime: Long? = null,
         batteryLevel: Int? = null,
         speedKmh: Float? = null,
+        bearing: Float? = null,
+        bearingAccuracyDegrees: Float? = null,
         isCallActive: Boolean? = null
     ) {
         socket?.emit("location_update", JSONObject().apply {
@@ -319,6 +321,8 @@ class SignalingClient(
             locationTime?.let { put("locationTime", it) }
             batteryLevel?.let { put("batteryLevel", it) }
             speedKmh?.let { put("speedKmh", it) }
+            bearing?.let { put("bearing", it) }
+            bearingAccuracyDegrees?.let { put("bearingAccuracyDegrees", it) }
             isCallActive?.let { put("isCallActive", it) }
         })
     }

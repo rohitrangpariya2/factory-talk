@@ -7,8 +7,10 @@ describe('factory telemetry map script', () => {
 
   test('parses call status and speed payload in websocket events', () => {
     expect(handlerSource).toContain('speedKmh = payload?.speedKmh');
+    expect(handlerSource).toContain('bearing = payload?.bearing');
+    expect(handlerSource).toContain('bearingAccuracyDegrees = payload?.bearingAccuracyDegrees');
     expect(handlerSource).toContain('isCallActive = payload?.isCallActive');
-    expect(handlerSource).toContain('speedKmh,');
+    expect(handlerSource).toContain('buildAcceptedLocation');
     expect(handlerSource).toContain('isCallActive');
   });
 

@@ -12,6 +12,8 @@ type PersistableLocation = {
   receivedAt?: number;
   locationUpdatedAt: number;
   speedKmh?: number;
+  bearing?: number;
+  bearingAccuracyDegrees?: number;
   isCallActive?: boolean;
 };
 

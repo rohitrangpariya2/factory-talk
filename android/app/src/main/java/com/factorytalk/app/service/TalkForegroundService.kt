@@ -1,5 +1,6 @@
 package com.factorytalk.app.service
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -305,12 +306,11 @@ class TalkForegroundService : Service() {
 
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                if (lastKnownLocation == null || location.accuracy <= (lastKnownLocation?.accuracy ?: Float.MAX_VALUE)) {
+                val previous = lastKnownLocation
+                if (previous == null || shouldAcceptLocation(location, previous)) {
                     lastKnownLocation = location
-                } else {
-                    lastKnownLocation = location
+                    sendLastKnownLocation()
                 }
-                sendLastKnownLocation()
             }
         }
         try {
@@ -333,7 +333,9 @@ class TalkForegroundService : Service() {
         }
     }
 
+    @SuppressLint("MissingPermission")
     private fun loadLastKnownLocation(locationManager: LocationManager) {
+        if (!hasLocationPermission()) return
         locationManager.getProviders(true).forEach { provider ->
             runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()?.let { location ->
                 if (lastKnownLocation == null || location.time >= (lastKnownLocation?.time ?: 0L)) {
@@ -356,8 +358,8 @@ class TalkForegroundService : Service() {
         val now = System.currentTimeMillis()
         val batteryLevel = getBatteryLevel()
         val isFreshLocation = !isLocationStale(location, Constants.LOCATION_FIX_STALE_MS)
-        // Convert Location.speed (m/s) to km/h; only report if GPS provides it
-        val speedKmhValue: Float? = if (location.hasSpeed() && location.speed >= 0f) location.speed * 3.6f else null
+        val speedKmhValue = validatedSpeedKmh(location, isFreshLocation)
+        val bearingValue = validatedBearing(location, isFreshLocation)
         val isCallActiveValue: Boolean = lastCallBusyStatus
         if (!isFreshLocation) {
             if (
@@ -375,7 +377,6 @@ class TalkForegroundService : Service() {
                 location.longitude,
                 location.accuracy,
                 batteryLevel = batteryLevel,
-                speedKmh = speedKmhValue,
                 isCallActive = isCallActiveValue
             )
             lastStaleLocationHeartbeatAt = now
@@ -390,6 +391,8 @@ class TalkForegroundService : Service() {
             location.time,
             batteryLevel,
             speedKmh = speedKmhValue,
+            bearing = bearingValue?.first,
+            bearingAccuracyDegrees = bearingValue?.second,
             isCallActive = isCallActiveValue
         )
         hasSentFreshLocation = true
@@ -420,6 +423,42 @@ class TalkForegroundService : Service() {
     private fun isLocationStale(location: Location, maxAgeMs: Long): Boolean {
         val ageMs = System.currentTimeMillis() - location.time
         return location.time <= 0L || ageMs > maxAgeMs || ageMs < -30_000L
+    }
+
+    private fun shouldAcceptLocation(location: Location, previous: Location): Boolean {
+        val locationFresh = !isLocationStale(location, Constants.LOCATION_FIX_STALE_MS)
+        val previousFresh = !isLocationStale(previous, Constants.LOCATION_FIX_STALE_MS)
+        if (locationFresh && !previousFresh) return true
+        if (!locationFresh && previousFresh) return false
+        if (location.time > previous.time + 15_000L) return true
+        return location.accuracy <= previous.accuracy + 20f
+    }
+
+    private fun validatedSpeedKmh(location: Location, isFreshLocation: Boolean): Float? {
+        if (!isFreshLocation || !location.hasSpeed() || location.speed < 0f) return null
+        val speedKmh = location.speed * 3.6f
+        if (speedKmh > 130f) return null
+        if (location.hasAccuracy() && location.accuracy > 100f) return null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            location.hasSpeedAccuracy() &&
+            location.speedAccuracyMetersPerSecond > 8f
+        ) {
+            return null
+        }
+        return speedKmh
+    }
+
+    private fun validatedBearing(location: Location, isFreshLocation: Boolean): Pair<Float, Float>? {
+        if (!isFreshLocation || !location.hasBearing()) return null
+        if (location.hasAccuracy() && location.accuracy > 100f) return null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            !location.hasBearingAccuracy() ||
+            location.bearingAccuracyDegrees > 45f
+        ) {
+            return null
+        }
+        val normalizedBearing = ((location.bearing % 360f) + 360f) % 360f
+        return normalizedBearing to location.bearingAccuracyDegrees
     }
 
     private fun updateLocationStatus(status: String) {
