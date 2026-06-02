@@ -81,4 +81,11 @@ describe('delivery history report', () => {
     expect(range.date).toBe('2026-06-02');
     expect(range.endMs - range.startMs).toBe(24 * 60 * 60 * 1000);
   });
+
+  test('parses selected date using browser timezone offset when provided', () => {
+    const range = parseDeliveryHistoryDateRange('2026-06-02', -330);
+
+    expect(new Date(range.startMs).toISOString()).toBe('2026-06-01T18:30:00.000Z');
+    expect(new Date(range.endMs).toISOString()).toBe('2026-06-02T18:30:00.000Z');
+  });
 });

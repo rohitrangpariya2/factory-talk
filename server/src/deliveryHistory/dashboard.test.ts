@@ -20,7 +20,10 @@ describe('delivery history dashboard route', () => {
     expect(html).toContain('id="replayButton"');
     expect(html).toContain('Export CSV');
     expect(html).toContain('Old reports may be unavailable if location history was cleaned.');
+    expect(html).toContain('No history available for selected user/date.');
+    expect(html).toContain('getTimezoneOffset');
     expect(html).toContain('/delivery-history/report');
     expect(html).toContain('/delivery-history/export');
+    expect(html).toContain('loadReport();');
   });
 });

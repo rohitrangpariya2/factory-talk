@@ -176,7 +176,9 @@ export function buildDeliveryHistoryDashboardHtml(): string {
         setStatus('Select user and date before export.');
         return false;
       }
-      window.location.href = '/delivery-history/export?userId=' + encodeURIComponent(userId) + '&date=' + encodeURIComponent(date);
+      window.location.href = '/delivery-history/export?userId=' + encodeURIComponent(userId) +
+        '&date=' + encodeURIComponent(date) +
+        '&timezoneOffsetMinutes=' + encodeURIComponent(String(new Date().getTimezoneOffset()));
       return false;
     }
 
@@ -195,6 +197,9 @@ export function buildDeliveryHistoryDashboardHtml(): string {
         if (!document.getElementById('userFilter').value && data.locations && data.locations[0]) {
           document.getElementById('userFilter').value = data.locations[0].userId;
         }
+        if (document.getElementById('userFilter').value && document.getElementById('dateFilter').value) {
+          loadReport();
+        }
       } catch (error) {
         setStatus('Unable to load live users. Enter userId manually.');
       }
@@ -210,7 +215,9 @@ export function buildDeliveryHistoryDashboardHtml(): string {
       setStatus('Loading report...');
       stopReplay();
       try {
-        const response = await fetch('/delivery-history/report?userId=' + encodeURIComponent(userId) + '&date=' + encodeURIComponent(date), { cache: 'no-store' });
+        const response = await fetch('/delivery-history/report?userId=' + encodeURIComponent(userId) +
+          '&date=' + encodeURIComponent(date) +
+          '&timezoneOffsetMinutes=' + encodeURIComponent(String(new Date().getTimezoneOffset())), { cache: 'no-store' });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Failed to load report');
         currentReport = data.report;
@@ -240,7 +247,7 @@ export function buildDeliveryHistoryDashboardHtml(): string {
       document.getElementById('reportDateValue').textContent = report.date;
       document.getElementById('rejectedValue').textContent = String(report.rejectedPointCount || 0);
       drawRoute(report.routeReplay || []);
-      setStatus((report.routeReplay || []).length ? 'Report loaded. Route replay is ready.' : 'Report loaded, but no replay points found.');
+      setStatus((report.routeReplay || []).length ? 'Report loaded. Route replay is ready.' : 'No history available for selected user/date.');
     }
 
     function drawRoute(points) {

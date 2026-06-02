@@ -51,17 +51,24 @@ const MIN_GPS_JUMP_INTERVAL_MS = 4000;
 const MOVING_SEGMENT_DISTANCE_METERS = 60;
 const RETURN_CONFIRM_MS = 60 * 1000;
 
-export function parseDeliveryHistoryDateRange(dateValue: string): DeliveryHistoryDateRange {
+export function parseDeliveryHistoryDateRange(
+  dateValue: string,
+  timezoneOffsetMinutes?: number
+): DeliveryHistoryDateRange {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
     throw new Error('date must use YYYY-MM-DD format');
   }
 
   const [year, month, day] = dateValue.split('-').map(Number);
-  const start = new Date(year, month - 1, day, 0, 0, 0, 0);
+  const utcValidation = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+  const hasBrowserOffset = Number.isFinite(timezoneOffsetMinutes);
+  const start = hasBrowserOffset
+    ? new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0) + Number(timezoneOffsetMinutes) * 60 * 1000)
+    : new Date(year, month - 1, day, 0, 0, 0, 0);
   if (
-    start.getFullYear() !== year ||
-    start.getMonth() !== month - 1 ||
-    start.getDate() !== day
+    utcValidation.getUTCFullYear() !== year ||
+    utcValidation.getUTCMonth() !== month - 1 ||
+    utcValidation.getUTCDate() !== day
   ) {
     throw new Error('date is invalid');
   }

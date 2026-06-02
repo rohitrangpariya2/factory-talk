@@ -140,7 +140,10 @@ app.get('/delivery-history/report', async (req, res) => {
       return;
     }
 
-    const range = parseDeliveryHistoryDateRange(date);
+    const timezoneOffsetMinutes = req.query.timezoneOffsetMinutes !== undefined
+      ? Number(req.query.timezoneOffsetMinutes)
+      : undefined;
+    const range = parseDeliveryHistoryDateRange(date, timezoneOffsetMinutes);
     const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
     const report = buildDeliveryHistoryReport(history, range.date);
     res.status(200).json({
@@ -167,7 +170,10 @@ app.get('/delivery-history/export', async (req, res) => {
       return;
     }
 
-    const range = parseDeliveryHistoryDateRange(date);
+    const timezoneOffsetMinutes = req.query.timezoneOffsetMinutes !== undefined
+      ? Number(req.query.timezoneOffsetMinutes)
+      : undefined;
+    const range = parseDeliveryHistoryDateRange(date, timezoneOffsetMinutes);
     const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
     const report = buildDeliveryHistoryReport(history, range.date);
     const csv = deliveryHistoryReportToCsv(report);
