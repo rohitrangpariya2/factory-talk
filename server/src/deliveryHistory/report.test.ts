@@ -71,7 +71,7 @@ describe('delivery history report', () => {
 
     const csv = deliveryHistoryReportToCsv(report);
 
-    expect(csv).toContain('date,userId,name,dailyDistanceKm,movingTime,stoppedTime,firstDeparture,returnToFactory,pointCount,rejectedPointCount');
+    expect(csv).toContain('date,userId,name,dailyDistanceKm,movingTime,stoppedTime,firstDeparture,returnToFactory,totalStops,totalStoppedTime,longestStop,pointCount,rejectedPointCount');
     expect(csv).toContain('2026-06-02,driver-1,Delivery Boy');
   });
 

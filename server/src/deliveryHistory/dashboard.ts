@@ -76,6 +76,14 @@ export function buildDeliveryHistoryDashboardHtml(): string {
     .table { width: 100%; border-collapse: collapse; margin-top: 12px; color: #e5e7eb; }
     .table th, .table td { text-align: left; border-bottom: 1px solid rgba(255,255,255,.08); padding: 8px 4px; font-size: 12px; }
     .table th { color: #94a3b8; font-weight: 900; }
+    .stop-marker {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #f59e0b;
+      border: 3px solid #ffffff;
+      box-shadow: 0 3px 14px rgba(0,0,0,.45);
+    }
     @media (max-width: 860px) {
       .filters { grid-template-columns: 1fr 1fr; }
       .main { grid-template-columns: 1fr; }
@@ -112,6 +120,8 @@ export function buildDeliveryHistoryDashboardHtml(): string {
           <div class="metric"><div class="metric-label">Points</div><div class="metric-value" id="pointsValue">-</div></div>
           <div class="metric"><div class="metric-label">First departure</div><div class="metric-value" id="departureValue">-</div></div>
           <div class="metric"><div class="metric-label">Return to factory</div><div class="metric-value" id="returnValue">-</div></div>
+          <div class="metric"><div class="metric-label">Total stops</div><div class="metric-value" id="totalStopsValue">-</div></div>
+          <div class="metric"><div class="metric-label">Longest stop</div><div class="metric-value" id="longestStopValue">-</div></div>
         </div>
         <div class="replay-controls">
           <button type="button" id="replayButton" onclick="startReplay()">Replay</button>
@@ -141,6 +151,7 @@ export function buildDeliveryHistoryDashboardHtml(): string {
     let replayMarker = null;
     let replayTimer = null;
     let currentReport = null;
+    let stopMarkers = [];
 
     function todayValue() {
       const now = new Date();
@@ -232,7 +243,7 @@ export function buildDeliveryHistoryDashboardHtml(): string {
     function renderReport(report) {
       clearRoute();
       if (!report) {
-        ['distanceValue','movingValue','stoppedValue','pointsValue','departureValue','returnValue','userValue','reportDateValue','rejectedValue'].forEach((id) => {
+        ['distanceValue','movingValue','stoppedValue','pointsValue','departureValue','returnValue','totalStopsValue','longestStopValue','userValue','reportDateValue','rejectedValue'].forEach((id) => {
           document.getElementById(id).textContent = '-';
         });
         return;
@@ -243,10 +254,13 @@ export function buildDeliveryHistoryDashboardHtml(): string {
       document.getElementById('pointsValue').textContent = String(report.pointCount || 0);
       document.getElementById('departureValue').textContent = formatClock(report.firstDepartureAt);
       document.getElementById('returnValue').textContent = formatClock(report.returnToFactoryAt);
+      document.getElementById('totalStopsValue').textContent = String((report.stopSummary && report.stopSummary.totalStops) || 0);
+      document.getElementById('longestStopValue').textContent = formatDuration(report.stopSummary && report.stopSummary.longestStopMs);
       document.getElementById('userValue').textContent = report.name ? report.name + ' (' + report.userId + ')' : report.userId;
       document.getElementById('reportDateValue').textContent = report.date;
       document.getElementById('rejectedValue').textContent = String(report.rejectedPointCount || 0);
       drawRoute(report.routeReplay || []);
+      drawStopMarkers(report.stops || []);
       setStatus((report.routeReplay || []).length ? 'Report loaded. Route replay is ready.' : 'No history available for selected user/date.');
     }
 
@@ -272,6 +286,27 @@ export function buildDeliveryHistoryDashboardHtml(): string {
       routeLine = null;
       if (replayMarker) map.removeLayer(replayMarker);
       replayMarker = null;
+      stopMarkers.forEach((marker) => map.removeLayer(marker));
+      stopMarkers = [];
+    }
+
+    function drawStopMarkers(stops) {
+      stopMarkers.forEach((marker) => map.removeLayer(marker));
+      stopMarkers = [];
+      stopMarkers = stops
+        .filter((stop) => Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)))
+        .map((stop, index) => L.marker([stop.latitude, stop.longitude], {
+          icon: L.divIcon({
+            className: '',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+            html: '<div class="stop-marker"></div>'
+          })
+        }).addTo(map).bindPopup(
+          'Stop ' + (index + 1) + '<br>' +
+          formatDuration(stop.durationMs) + '<br>' +
+          formatClock(stop.startTime) + ' - ' + formatClock(stop.endTime)
+        ));
     }
 
     function startReplay() {

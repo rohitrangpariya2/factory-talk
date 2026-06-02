@@ -20,6 +20,7 @@ import { getGeofenceEventsForRange } from './geofence/geofenceHistoryService';
 import { buildGeofenceDailyReport } from './geofence/geofenceReport';
 import { getSavedLocationHistory, getSavedLocationHistoryForRange, scheduleLocationHistoryCleanup } from './services/locationHistoryService';
 import { getLatestLocations, getLocationHistory, setupSocketHandler } from './signaling/socketHandler';
+import { getStopEventsForRange } from './stops/stopHistoryService';
 
 const app = express();
 const server = http.createServer(app);
@@ -149,7 +150,8 @@ app.get('/delivery-history/report', async (req, res) => {
       : undefined;
     const range = parseDeliveryHistoryDateRange(date, timezoneOffsetMinutes);
     const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
-    const report = buildDeliveryHistoryReport(history, range.date);
+    const stops = await getStopEventsForRange(userId, range.startMs, range.endMs);
+    const report = buildDeliveryHistoryReport(history, range.date, undefined, stops);
     res.status(200).json({
       report,
       warning: 'Old reports may be unavailable if location history was cleaned.'
@@ -179,7 +181,8 @@ app.get('/delivery-history/export', async (req, res) => {
       : undefined;
     const range = parseDeliveryHistoryDateRange(date, timezoneOffsetMinutes);
     const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
-    const report = buildDeliveryHistoryReport(history, range.date);
+    const stops = await getStopEventsForRange(userId, range.startMs, range.endMs);
+    const report = buildDeliveryHistoryReport(history, range.date, undefined, stops);
     const csv = deliveryHistoryReportToCsv(report);
     const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

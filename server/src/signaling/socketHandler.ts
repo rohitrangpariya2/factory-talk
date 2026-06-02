@@ -11,6 +11,8 @@ import { persistLocationHistory } from '../services/locationHistoryService';
 import { getGeofenceConfig } from '../geofence/geofenceConfigService';
 import { persistGeofenceEvent } from '../geofence/geofenceHistoryService';
 import { evaluateGeofenceTransition } from '../geofence/geofenceService';
+import { evaluateStopTransition } from '../stops/stopDetectionService';
+import { persistStopEvent } from '../stops/stopHistoryService';
 import { buildAudioRelayEvent } from './audioRelay';
 import { buildAcceptedLocation } from './locationTelemetry';
 
@@ -255,6 +257,12 @@ export function setupSocketHandler(io: Server) {
         .catch((error) => {
           console.error('Failed to evaluate geofence event:', error);
         });
+      const completedStop = evaluateStopTransition(trackedLocation);
+      if (completedStop) {
+        void persistStopEvent(completedStop).catch((error) => {
+          console.error('Failed to persist stop event:', error);
+        });
+      }
 
       io.emit('user_location_updated', trackedLocation);
     });

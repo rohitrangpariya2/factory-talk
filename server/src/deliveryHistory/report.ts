@@ -1,4 +1,6 @@
 import { FACTORY_ZONE, FactoryZone } from '../map/factoryZone';
+import { StopEvent } from '../stops/stopDetectionService';
+import { buildStopSummary, StopSummary } from '../stops/stopReport';
 import { UserRole } from '../types';
 
 export type DeliveryHistoryPoint = {
@@ -36,6 +38,8 @@ export type DeliveryHistoryReport = {
     speedKmh?: number;
     bearing?: number;
   }>;
+  stops: StopEvent[];
+  stopSummary: StopSummary;
 };
 
 export type DeliveryHistoryDateRange = {
@@ -84,7 +88,8 @@ export function parseDeliveryHistoryDateRange(
 export function buildDeliveryHistoryReport(
   rawPoints: DeliveryHistoryPoint[],
   date: string,
-  factoryZone: FactoryZone = FACTORY_ZONE
+  factoryZone: FactoryZone = FACTORY_ZONE,
+  stops: StopEvent[] = []
 ): DeliveryHistoryReport {
   const sorted = rawPoints
     .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
@@ -131,7 +136,9 @@ export function buildDeliveryHistoryReport(
       locationUpdatedAt: point.locationUpdatedAt,
       speedKmh: point.speedKmh,
       bearing: point.bearing
-    }))
+    })),
+    stops,
+    stopSummary: buildStopSummary(stops)
   };
 }
 
@@ -146,6 +153,9 @@ export function deliveryHistoryReportToCsv(report: DeliveryHistoryReport): strin
       'stoppedTime',
       'firstDeparture',
       'returnToFactory',
+      'totalStops',
+      'totalStoppedTime',
+      'longestStop',
       'pointCount',
       'rejectedPointCount'
     ],
@@ -158,6 +168,9 @@ export function deliveryHistoryReportToCsv(report: DeliveryHistoryReport): strin
       formatDuration(report.stoppedTimeMs),
       formatTimestamp(report.firstDepartureAt),
       formatTimestamp(report.returnToFactoryAt),
+      String(report.stopSummary.totalStops),
+      formatDuration(report.stopSummary.totalStoppedTimeMs),
+      formatDuration(report.stopSummary.longestStopMs),
       String(report.pointCount),
       String(report.rejectedPointCount)
     ]
