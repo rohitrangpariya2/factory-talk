@@ -649,6 +649,47 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       border: 1px solid rgba(255, 255, 255, 0.2);
       white-space: nowrap;
     }
+
+    @keyframes blink {
+      0% { opacity: 1; }
+      50% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+    .call-blink {
+      animation: blink 1.2s infinite;
+      font-weight: bold;
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #fbbf24;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .motion-badge {
+      background: rgba(29, 155, 240, 0.15);
+      border: 1px solid rgba(29, 155, 240, 0.3);
+      color: #7dd3fc;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: bold;
+    }
+    .motion-badge.motion-stationary {
+      background: rgba(148, 163, 184, 0.15);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: #cbd5e1;
+    }
+    .motion-badge.motion-walking {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #a7f3d0;
+    }
   </style>
 </head>
 <body>
@@ -933,10 +974,29 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const status = statusFor(location);
       const accuracy = location.accuracy ? Math.round(location.accuracy) + 'm accuracy' : 'accuracy unknown';
       const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + location.latitude + ',' + location.longitude;
+      
+      let telemetryHtml = '';
+      if (location.speedKmh !== undefined) {
+        const speedVal = Math.round(location.speedKmh);
+        let speedLabel = '🧍 Stationary';
+        if (speedVal > 15) {
+          speedLabel = '🚗 ' + speedVal + ' km/h (Driving)';
+        } else if (speedVal > 0) {
+          speedLabel = '🚶 ' + speedVal + ' km/h (Walking)';
+        }
+        telemetryHtml += '<tr><td><strong>Motion:</strong></td><td>' + speedLabel + '</td></tr>';
+      } else {
+        telemetryHtml += '<tr><td><strong>Motion:</strong></td><td>🧍 Stationary</td></tr>';
+      }
+      if (location.isCallActive) {
+        telemetryHtml += '<tr><td><strong>Call Status:</strong></td><td style="color:#fbbf24;font-weight:bold">📞 On Active Phone Call</td></tr>';
+      }
+
       return '<strong>' + escapeText(location.name || 'Factory Phone') + '</strong><br>' +
         '<span style="color:' + status.color + '">' + status.label + '</span> - ' + timeAgo(location) + '<br>' +
-        escapeText(accuracy) + '<br><br>' +
-        '<a style="color:#38bdf8" target="_blank" rel="noopener" href="' + mapsUrl + '">Open in Google Maps</a>';
+        escapeText(accuracy) + '<br>' +
+        (telemetryHtml ? '<table style="margin-top:6px;font-size:12px;border-top:1px solid #374151;padding-top:4px">' + telemetryHtml + '</table>' : '') +
+        '<br><a style="color:#38bdf8" target="_blank" rel="noopener" href="' + mapsUrl + '">Open in Google Maps</a>';
     }
 
     function liveTrailPoints(points) {
@@ -1120,14 +1180,32 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         const accuracy = location.accuracy ? Math.round(location.accuracy) + 'm' : 'unknown';
         const pointCount = historyCounts.get(location.userId) || 0;
         const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + location.latitude + ',' + location.longitude;
+        
+        let badgesHtml = '';
+        const speedVal = location.speedKmh !== undefined ? Math.round(location.speedKmh) : 0;
+        if (speedVal > 15) {
+          badgesHtml += '<span class="motion-badge">🚗 ' + speedVal + ' km/h</span>';
+        } else if (speedVal > 0) {
+          badgesHtml += '<span class="motion-badge motion-walking">🚶 ' + speedVal + ' km/h</span>';
+        } else {
+          badgesHtml += '<span class="motion-badge motion-stationary">🧍 Stationary</span>';
+        }
+
+        if (location.isCallActive) {
+          badgesHtml += '<span class="call-blink">📞 On Call</span>';
+        }
+
         return '<div class="user">' +
           '<div>' +
-            '<div style="font-weight:800">' + escapeText(location.name || 'Factory Phone') + '</div>' +
+            '<div style="font-weight:800;display:flex;align-items:center;gap:6px">' +
+              escapeText(location.name || 'Factory Phone') +
+              badgesHtml +
+            '</div>' +
             '<div class="muted"><span class="dot" style="background:' + status.color + '"></span> ' +
               status.label + ' - ' + timeAgo(location) + ' - ' + escapeText(accuracy) + ' - Trail ' + pointCount + '</div>' +
           '</div>' +
           '<div style="display:flex;gap:6px;align-items:center">' +
-            '<button onclick="focusUser(\\'' + escapeText(location.userId) + '\\')">Track</button>' +
+            '<button onclick="focusUser(\'' + escapeText(location.userId) + '\')">Track</button>' +
             '<a target="_blank" rel="noopener" href="' + mapsUrl + '">Google</a>' +
           '</div>' +
         '</div>';

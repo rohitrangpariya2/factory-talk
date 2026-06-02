@@ -22,6 +22,8 @@ type TrackedLocation = {
   isBusy?: boolean;
   receivedAt?: number;
   locationUpdatedAt: number;
+  speedKmh?: number;
+  isCallActive?: boolean;
 };
 
 type LocationHistoryPoint = TrackedLocation & {
@@ -201,6 +203,9 @@ export function setupSocketHandler(io: Server) {
       const longitude = Number(payload?.longitude);
       const accuracy = Number(payload?.accuracy);
       const locationTime = Number(payload?.locationTime);
+      const speedKmh = payload?.speedKmh !== undefined ? Number(payload.speedKmh) : undefined;
+      const isCallActive = payload?.isCallActive !== undefined ? Boolean(payload.isCallActive) : undefined;
+
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
       if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return;
       const now = Date.now();
@@ -222,7 +227,9 @@ export function setupSocketHandler(io: Server) {
         accuracy: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : undefined,
         isBusy: !!user.isBusy,
         receivedAt: now,
-        locationUpdatedAt: user.locationUpdatedAt
+        locationUpdatedAt: user.locationUpdatedAt,
+        speedKmh,
+        isCallActive
       };
       latestLocations.set(user.userId, trackedLocation);
       appendLocationHistory(trackedLocation);

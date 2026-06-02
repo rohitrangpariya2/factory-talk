@@ -11,6 +11,8 @@ type PersistableLocation = {
   isBusy?: boolean;
   receivedAt?: number;
   locationUpdatedAt: number;
+  speedKmh?: number;
+  isCallActive?: boolean;
 };
 
 type PersistedLocation = PersistableLocation & {
