@@ -15,6 +15,7 @@ import { evaluateStopTransition } from '../stops/stopDetectionService';
 import { persistStopEvent } from '../stops/stopHistoryService';
 import { buildAudioRelayEvent } from './audioRelay';
 import { buildAcceptedLocation } from './locationTelemetry';
+import { classifyMotionStatus, MotionStatus } from '../map/motionStatus';
 
 let reminderSchedule: { onTime: string; offTime: string } | null = null;
 const busyDisconnectGraceTimers = new Map<string, NodeJS.Timeout>();
@@ -32,6 +33,7 @@ type TrackedLocation = {
   bearing?: number;
   bearingAccuracyDegrees?: number;
   isCallActive?: boolean;
+  motionStatus?: MotionStatus;
 };
 
 type LocationHistoryPoint = TrackedLocation & {
@@ -264,7 +266,10 @@ export function setupSocketHandler(io: Server) {
         });
       }
 
-      io.emit('user_location_updated', trackedLocation);
+      io.emit('user_location_updated', {
+        ...trackedLocation,
+        motionStatus: classifyMotionStatus(trackedLocation, getLocationHistory(user.userId), now)
+      });
     });
 
     socket.on('audio_chunk', (payload) => {

@@ -12,6 +12,7 @@ import { buildFactoryZoneScript } from './map/factoryZone';
 import { buildOsrmRouteUrl, normalizeRoadRouteCoordinates } from './map/roadRoute';
 import { buildRoadTrailScript } from './map/roadTrail';
 import { buildStopMarkersScript } from './map/stopMarkers';
+import { classifyMotionStatus } from './map/motionStatus';
 import { buildDeliveryHistoryDashboardHtml } from './deliveryHistory/dashboard';
 import { buildDeliveryHistoryReport, deliveryHistoryReportToCsv, parseDeliveryHistoryDateRange } from './deliveryHistory/report';
 import { buildGeofenceHistoryDashboardHtml } from './geofence/geofenceDashboard';
@@ -49,7 +50,12 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/locations', (req, res) => {
-  res.status(200).json({ locations: getLatestLocations() });
+  const now = Date.now();
+  const locations = getLatestLocations().map((location) => ({
+    ...location,
+    motionStatus: classifyMotionStatus(location, getLocationHistory(location.userId), now)
+  }));
+  res.status(200).json({ locations });
 });
 
 app.get('/locations/history', (req, res) => {
@@ -793,7 +799,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 </head>
 <body>
   <div id="map"></div>
-  <div id="deviationAlertBanner" class="deviation-banner">⚠️ ALERT: Driver deviated from the planned route!</div>
+  <div id="deviationAlertBanner" class="deviation-banner">âš ï¸ ALERT: Driver deviated from the planned route!</div>
   <div id="geofenceEventBanner" class="geofence-event-banner"></div>
   <div class="topbar">
     <div>
@@ -820,7 +826,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     </div>
   </div>
   <div id="playbackPanel" class="playback-panel">
-    <button type="button" class="playback-btn" id="playbackPlayBtn" onclick="togglePlaybackPlay()">▶</button>
+    <button type="button" class="playback-btn" id="playbackPlayBtn" onclick="togglePlaybackPlay()">â–¶</button>
     <div class="playback-meta">
       <span class="playback-time" id="playbackTimeText">00:00:00</span>
       <span id="playbackSpeedText">0 km/h</span>
@@ -895,6 +901,97 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       if (location.isBusy) return { label: 'Busy', color: '#f59e0b' };
       if (freshnessMs(location) > 120000) return { label: 'Old location', color: '#94a3b8' };
       return { label: 'Live', color: '#22c55e' };
+    }
+
+    const MOTION_GPS_STALE_MS = 5 * 60 * 1000;
+    const MOTION_STATIONARY_CONFIRM_MS = 60 * 1000;
+    const MOTION_MOVING_SPEED_KMH = 3;
+    const MOTION_MEANINGFUL_MOVE_METERS = 15;
+    const MOTION_RECENT_WINDOW_MS = 90 * 1000;
+
+    function motionStatusFor(location, historyPoints) {
+      if (location.motionStatus && location.motionStatus.state) return location.motionStatus;
+      const locationTime = Number(location.locationUpdatedAt || 0);
+      if (!Number.isFinite(locationTime) || locationTime <= 0) return { state: 'unknown', label: 'Live GPS' };
+      if (Date.now() - locationTime > MOTION_GPS_STALE_MS) return { state: 'gps_stale', label: 'GPS stale' };
+
+      const speed = Number(location.speedKmh);
+      if (Number.isFinite(speed) && speed >= MOTION_MOVING_SPEED_KMH) {
+        return { state: 'moving', label: 'Moving', speedKmh: speed };
+      }
+
+      const points = recentMotionPoints(location, historyPoints || []);
+      const movementSpeed = recentMovementSpeed(points);
+      if (movementSpeed !== undefined) return { state: 'moving', label: 'Moving', speedKmh: movementSpeed };
+      if (hasStationaryMotionWindow(points, locationTime)) return { state: 'stationary', label: 'Stationary' };
+      return { state: 'unknown', label: 'Live GPS' };
+    }
+
+    function recentMotionPoints(location, historyPoints) {
+      const locationTime = Number(location.locationUpdatedAt || 0);
+      const seen = new Set();
+      return historyPoints.concat(location)
+        .filter((point) =>
+          point.userId === location.userId &&
+          Number.isFinite(Number(point.latitude)) &&
+          Number.isFinite(Number(point.longitude)) &&
+          Number.isFinite(Number(point.locationUpdatedAt || 0)) &&
+          Number(point.locationUpdatedAt || 0) <= locationTime &&
+          Number(point.locationUpdatedAt || 0) >= locationTime - MOTION_RECENT_WINDOW_MS
+        )
+        .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0))
+        .filter((point) => {
+          const key = [
+            Math.round(Number(point.latitude) * 100000),
+            Math.round(Number(point.longitude) * 100000),
+            Number(point.locationUpdatedAt || 0)
+          ].join(':');
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(-3);
+    }
+
+    function recentMovementSpeed(points) {
+      const latest = points[points.length - 1];
+      if (!latest) return undefined;
+      for (let index = points.length - 2; index >= 0; index -= 1) {
+        const previous = points[index];
+        const elapsedMs = Number(latest.locationUpdatedAt || 0) - Number(previous.locationUpdatedAt || 0);
+        if (elapsedMs < 5000 || elapsedMs > MOTION_RECENT_WINDOW_MS) continue;
+        const distance = distanceMeters(previous, latest);
+        if (distance < MOTION_MEANINGFUL_MOVE_METERS) continue;
+        const speed = speedKmh(distance, elapsedMs);
+        if (Number.isFinite(speed) && speed > 0 && speed <= 140) return speed;
+      }
+      return undefined;
+    }
+
+    function hasStationaryMotionWindow(points, locationTime) {
+      if (points.length < 2) return false;
+      const earliest = points[0];
+      if (locationTime - Number(earliest.locationUpdatedAt || 0) < MOTION_STATIONARY_CONFIRM_MS) return false;
+      return points.every((point) => distanceMeters(earliest, point) < MOTION_MEANINGFUL_MOVE_METERS);
+    }
+
+    function motionLabel(status) {
+      if (!status || status.state === 'unknown') return 'Live GPS';
+      if (status.state === 'gps_stale') return 'GPS stale';
+      if (status.state === 'stationary') return 'Stationary';
+      const speed = Number(status.speedKmh);
+      if (Number.isFinite(speed) && speed >= 15) return Math.round(speed) + ' km/h (Driving)';
+      if (Number.isFinite(speed) && speed > 0) return Math.round(speed) + ' km/h (Moving)';
+      return 'Moving';
+    }
+
+    function motionBadgeHtml(location, historyPoints) {
+      const motion = motionStatusFor(location, historyPoints);
+      const label = motionLabel(motion);
+      if (motion.state === 'gps_stale') return '<span class="motion-badge motion-stationary">GPS stale</span>';
+      if (motion.state === 'stationary') return '<span class="motion-badge motion-stationary">Stationary</span>';
+      if (motion.state === 'moving') return '<span class="motion-badge' + (Number(motion.speedKmh) > 0 && Number(motion.speedKmh) < 15 ? ' motion-walking' : '') + '">' + label + '</span>';
+      return '<span class="motion-badge motion-walking">Live GPS</span>';
     }
 
     function timeAgo(location) {
@@ -1132,28 +1229,17 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const status = statusFor(location);
       const accuracy = location.accuracy ? Math.round(location.accuracy) + 'm accuracy' : 'accuracy unknown';
       const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + location.latitude + ',' + location.longitude;
-      
-      let telemetryHtml = '';
-      if (location.speedKmh !== undefined) {
-        const speedVal = Math.round(location.speedKmh);
-        let speedLabel = '🧍 Stationary';
-        if (speedVal > 15) {
-          speedLabel = '🚗 ' + speedVal + ' km/h (Driving)';
-        } else if (speedVal > 0) {
-          speedLabel = '🚶 ' + speedVal + ' km/h (Walking)';
-        }
-        telemetryHtml += '<tr><td><strong>Motion:</strong></td><td>' + speedLabel + '</td></tr>';
-      } else {
-        telemetryHtml += '<tr><td><strong>Motion:</strong></td><td>🧍 Stationary</td></tr>';
-      }
+      let telemetryHtml = '<tr><td><strong>Motion:</strong></td><td>' +
+        motionLabel(motionStatusFor(location, lastHistoryPoints)) +
+        '</td></tr>';
       if (location.isCallActive) {
-        telemetryHtml += '<tr><td><strong>Call Status:</strong></td><td style="color:#fbbf24;font-weight:bold">📞 On Active Phone Call</td></tr>';
+        telemetryHtml += '<tr><td><strong>Call Status:</strong></td><td style="color:#fbbf24;font-weight:bold">On Active Phone Call</td></tr>';
       }
 
       return '<strong>' + escapeText(location.name || 'Factory Phone') + '</strong><br>' +
         '<span style="color:' + status.color + '">' + status.label + '</span> - ' + timeAgo(location) + '<br>' +
         escapeText(accuracy) + '<br>' +
-        (telemetryHtml ? '<table style="margin-top:6px;font-size:12px;border-top:1px solid #374151;padding-top:4px">' + telemetryHtml + '</table>' : '') +
+        '<table style="margin-top:6px;font-size:12px;border-top:1px solid #374151;padding-top:4px">' + telemetryHtml + '</table>' +
         '<br><a style="color:#38bdf8" target="_blank" rel="noopener" href="' + mapsUrl + '">Open in Google Maps</a>';
     }
 
@@ -1428,19 +1514,10 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         const accuracy = location.accuracy ? Math.round(location.accuracy) + 'm' : 'unknown';
         const pointCount = historyCounts.get(location.userId) || 0;
         const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + location.latitude + ',' + location.longitude;
-        
-        let badgesHtml = '';
-        const speedVal = location.speedKmh !== undefined ? Math.round(location.speedKmh) : 0;
-        if (speedVal > 15) {
-          badgesHtml += '<span class="motion-badge">🚗 ' + speedVal + ' km/h</span>';
-        } else if (speedVal > 0) {
-          badgesHtml += '<span class="motion-badge motion-walking">🚶 ' + speedVal + ' km/h</span>';
-        } else {
-          badgesHtml += '<span class="motion-badge motion-stationary">🧍 Stationary</span>';
-        }
+        let badgesHtml = motionBadgeHtml(location, historyPoints || []);
 
         if (location.isCallActive) {
-          badgesHtml += '<span class="call-blink">📞 On Call</span>';
+          badgesHtml += '<span class="call-blink">On Call</span>';
         }
 
         return '<div class="user">' +
@@ -1833,7 +1910,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const banner = document.getElementById('deviationAlertBanner');
       if (banner) {
         if (show) {
-          banner.innerHTML = '⚠️ ALERT: ' + escapeText(driverName) + ' deviated from planned route! (' + formatDistance(maxDev) + ')';
+          banner.innerHTML = 'âš ï¸ ALERT: ' + escapeText(driverName) + ' deviated from planned route! (' + formatDistance(maxDev) + ')';
           banner.style.display = 'flex';
         } else {
           banner.style.display = 'none';
@@ -2059,7 +2136,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       if (isPlaybackPlaying) return;
       isPlaybackPlaying = true;
       const btn = document.getElementById('playbackPlayBtn');
-      if (btn) btn.textContent = '❚❚';
+      if (btn) btn.textContent = 'âšâš';
       
       const baseIntervalMs = 400; // time per point step
       const stepIntervalMs = Math.max(40, Math.round(baseIntervalMs / playbackSpeed));
@@ -2070,7 +2147,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     function pausePlayback() {
       isPlaybackPlaying = false;
       const btn = document.getElementById('playbackPlayBtn');
-      if (btn) btn.textContent = '▶';
+      if (btn) btn.textContent = 'â–¶';
       if (playbackTimer) {
         clearInterval(playbackTimer);
         playbackTimer = null;
@@ -2311,7 +2388,7 @@ setupSocketHandler(io);
 
 // Start server
 server.listen(env.port, () => {
-  console.log(`🚀 Factory Talk Signaling Server running on port ${env.port}`);
+  console.log(`ðŸš€ Factory Talk Signaling Server running on port ${env.port}`);
   console.log(`STUN Server: ${env.stunServer}`);
   if (env.turnServer) {
     console.log(`TURN Server: ${env.turnServer}`);
