@@ -253,13 +253,20 @@ class TalkForegroundService : Service() {
         }
     }
 
+    private fun isWithinTrackingHours(): Boolean {
+        val calendar = java.util.Calendar.getInstance()
+        val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+        return hour in 9..19
+    }
+
     private fun observeLocationSharing() {
         if (locationJob?.isActive == true) return
         locationJob = serviceScope.launch {
             while (true) {
                 val enabled = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                     .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
-                if (enabled && hasLocationPermission()) {
+                val withinHours = isWithinTrackingHours()
+                if (enabled && hasLocationPermission() && withinHours) {
                     if (locationListener == null) {
                         startForegroundServiceWithNotification()
                     }
@@ -269,7 +276,13 @@ class TalkForegroundService : Service() {
                     startLocationUpdates()
                     sendLastKnownLocation(allowStaleHeartbeat = true)
                 } else {
-                    if (enabled) updateLocationStatus("Location permission missing")
+                    if (enabled) {
+                        if (!withinHours) {
+                            updateLocationStatus("Tracking inactive (Active hours: 9AM - 8PM)")
+                        } else {
+                            updateLocationStatus("Location permission missing")
+                        }
+                    }
                     stopLocationUpdates()
                 }
                 delay(5_000L)
@@ -338,6 +351,7 @@ class TalkForegroundService : Service() {
     }
 
     private fun sendLastKnownLocation(allowStaleHeartbeat: Boolean = false) {
+        if (!isWithinTrackingHours()) return
         val location = lastKnownLocation ?: return
         val now = System.currentTimeMillis()
         val batteryLevel = getBatteryLevel()
