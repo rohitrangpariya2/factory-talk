@@ -1316,16 +1316,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     function buildTodayDeliverySummary(location, historyPoints) {
       const points = userHistoryFor(location, historyPoints);
       const sourcePoints = points.length ? points : [location];
-      const trips = splitFactoryTrips(sourcePoints);
-      const activeTrip = trips.find((trip) => !trip.isComplete);
-      const latestTrip = trips[trips.length - 1];
-      const summary = trips.reduce((total, trip) => {
-        const report = buildTripReport(trip.points);
-        total.distanceMeters += report.distanceMeters;
-        total.timeMs += report.totalTimeMs;
-        total.stops += report.stops.length;
-        return total;
-      }, { distanceMeters: 0, timeMs: 0, stops: 0 });
+      const summary = buildUserTripSummary(sourcePoints);
+      const activeTrip = summary.trips.find((trip) => !trip.isComplete);
+      const latestTrip = summary.trips[summary.trips.length - 1];
 
       let tripStatus = 'No active trip';
       if (activeTrip) {
@@ -1336,9 +1329,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
 
       return {
         tripStatus,
-        todayKm: formatDistance(summary.distanceMeters),
-        totalTripTime: formatDuration(summary.timeMs),
-        stopsCount: String(summary.stops)
+        todayKm: formatDistance(summary.totalDistanceMeters),
+        totalTripTime: formatDuration(summary.totalTimeMs),
+        stopsCount: String(summary.totalStops)
       };
     }
 
@@ -1940,7 +1933,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       }
 
       const selectedName = escapeText(userPoints[userPoints.length - 1].name || 'Factory Phone');
-      const trips = splitFactoryTrips(userPoints);
+      const summary = buildUserTripSummary(userPoints);
+      const trips = summary.trips;
       currentTrips = trips;
       if (selectedTripIndex >= trips.length) {
         selectedTripIndex = -1;
@@ -1975,7 +1969,6 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         console.log('[FactoryTalk Debug] auto-selected trip index:', selectedTripIndex, 'forceLiveMapMode:', forceLiveMapMode);
       }
 
-      const summary = buildTripSummary(trips);
       updateTripDrawerChrome(
         'Aaj ni trips - ' + selectedName,
         summary.totalTrips + ' trip, ' + formatDistance(summary.totalDistanceMeters) + ' - tap karo details mate'
@@ -1995,6 +1988,19 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         tripLayers.clearLayers();
         setLiveLayersVisible(true);
       }
+    }
+
+    function buildUserTripSummary(points) {
+      const userPoints = simplifyPoints(points
+        .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
+        .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0)));
+      const trips = splitFactoryTrips(userPoints);
+      const summary = buildTripSummary(trips);
+      return {
+        ...summary,
+        totalStops: trips.reduce((total, trip) => total + buildTripReport(trip.points).stops.length, 0),
+        trips
+      };
     }
 
     function buildTripSummary(trips) {

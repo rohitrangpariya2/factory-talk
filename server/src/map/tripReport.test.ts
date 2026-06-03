@@ -22,8 +22,17 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('const tripDistanceCache = new Map()');
     expect(indexSource).toContain('function rememberRoadDistance(routeCacheKey, roadLatLngs)');
     expect(indexSource).toContain('function roadMatchedDistanceForPoints(points)');
+    expect(indexSource).toContain('function buildUserTripSummary(points)');
+    expect(indexSource).toContain('const summary = buildUserTripSummary(sourcePoints)');
     expect(indexSource).toContain('distanceMeters: matchedDistance ?? distance');
     expect(indexSource).toContain("distanceSource: matchedDistance === null ? 'raw_gps' : 'road_matched'");
+  });
+
+  test('card Today KM and bottom trip summary use the same simplified trip source', () => {
+    expect(indexSource).toContain('const userPoints = simplifyPoints(points');
+    expect(indexSource).toContain('const summary = buildUserTripSummary(sourcePoints)');
+    expect(indexSource).toContain('const summary = buildUserTripSummary(userPoints)');
+    expect(indexSource).not.toContain('const trips = splitFactoryTrips(sourcePoints);');
   });
 
   test('renders simple trip cards that can open each trip on the map', () => {
