@@ -59,12 +59,19 @@ describe('stop integration with delivery history', () => {
 
   test('report API reads stop events and passes them into delivery report', () => {
     expect(indexSource).toContain('getStopEventsForRange');
-    expect(indexSource).toContain('buildDeliveryHistoryReport(history, range.date, undefined, stops)');
+    expect(indexSource).toContain('const factoryZone = await getGeofenceConfig()');
+    expect(indexSource).toContain('buildDeliveryHistoryReport(history, range.date, factoryZone, stops)');
   });
 
   test('stop detection runs only after accepted GPS stream succeeds', () => {
     expect(socketSource).toContain('evaluateStopTransition(trackedLocation');
     expect(socketSource).toContain('persistStopEvent');
     expect(socketSource.indexOf('buildAcceptedLocation')).toBeLessThan(socketSource.indexOf('evaluateStopTransition(trackedLocation'));
+  });
+
+  test('restores stop detection state from saved accepted GPS before live processing', () => {
+    expect(socketSource).toContain('recoverStopDetectionStateFromHistory');
+    expect(socketSource).toContain('recoverTrackingStateForUser');
+    expect(socketSource.indexOf('await recoverTrackingStateForUser')).toBeLessThan(socketSource.indexOf('evaluateStopTransition(trackedLocation'));
   });
 });

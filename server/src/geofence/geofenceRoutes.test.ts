@@ -30,6 +30,12 @@ describe('geofence routes and live alert UI', () => {
     expect(socketSource.indexOf('buildAcceptedLocation')).toBeLessThan(socketSource.indexOf('evaluateGeofenceTransition(trackedLocation'));
   });
 
+  test('restores geofence state from saved accepted GPS before live transition checks', () => {
+    expect(socketSource).toContain('recoverGeofenceStateFromHistory');
+    expect(socketSource).toContain('recoverTrackingStateForUser');
+    expect(socketSource.indexOf('await recoverTrackingStateForUser')).toBeLessThan(socketSource.indexOf('evaluateGeofenceTransition(trackedLocation'));
+  });
+
   test('live map displays geofence event notifications', () => {
     expect(indexSource).toContain("socket.on('geofence_event'");
     expect(indexSource).toContain('function showGeofenceEvent');

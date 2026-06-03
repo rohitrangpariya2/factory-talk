@@ -7,11 +7,11 @@ import { joinChannel, leaveChannel, leaveAllChannels, getChannelMembers, getSock
 import { requestFloor, releaseFloor, getFloorState, checkFloorTimeouts } from './floorControl';
 import { sendBroadcastWakeUp } from '../services/fcmService';
 import { logTalkStart, logTalkEnd } from '../services/logService';
-import { persistLocationHistory } from '../services/locationHistoryService';
+import { getSavedLocationHistory, persistLocationHistory } from '../services/locationHistoryService';
 import { getGeofenceConfig } from '../geofence/geofenceConfigService';
 import { persistGeofenceEvent } from '../geofence/geofenceHistoryService';
-import { evaluateGeofenceTransition } from '../geofence/geofenceService';
-import { evaluateStopTransition } from '../stops/stopDetectionService';
+import { evaluateGeofenceTransition, recoverGeofenceStateFromHistory } from '../geofence/geofenceService';
+import { evaluateStopTransition, recoverStopDetectionStateFromHistory } from '../stops/stopDetectionService';
 import { persistStopEvent } from '../stops/stopHistoryService';
 import { buildAudioRelayEvent } from './audioRelay';
 import { buildAcceptedLocation } from './locationTelemetry';
@@ -48,6 +48,8 @@ const LOCATION_HISTORY_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const LOCATION_RECOVERY_REQUEST_INTERVAL_MS = 15_000;
 let locationHistorySequence = 0;
 let lastLocationRecoveryRequestedAt = 0;
+const recoveredTrackingStateByUser = new Set<string>();
+const trackingStateRecoveryInflight = new Map<string, Promise<void>>();
 
 export function getLatestLocations() {
   return Array.from(latestLocations.values());
@@ -83,6 +85,32 @@ function requestLocationRecovery(io: Server) {
   if (now - lastLocationRecoveryRequestedAt < LOCATION_RECOVERY_REQUEST_INTERVAL_MS) return;
   lastLocationRecoveryRequestedAt = now;
   io.emit('request_location_update');
+}
+
+async function recoverTrackingStateForUser(userId: string): Promise<void> {
+  if (recoveredTrackingStateByUser.has(userId)) return;
+  const inflight = trackingStateRecoveryInflight.get(userId);
+  if (inflight) return inflight;
+
+  const recovery = (async () => {
+    try {
+      const [config, history] = await Promise.all([
+        getGeofenceConfig(),
+        getSavedLocationHistory(userId, LOCATION_HISTORY_MAX_POINTS)
+      ]);
+      if (history.length > 0) {
+        recoverGeofenceStateFromHistory(history, config);
+        recoverStopDetectionStateFromHistory(history);
+        history.forEach((location) => appendLocationHistory(location as TrackedLocation));
+      }
+      recoveredTrackingStateByUser.add(userId);
+    } finally {
+      trackingStateRecoveryInflight.delete(userId);
+    }
+  })();
+
+  trackingStateRecoveryInflight.set(userId, recovery);
+  return recovery;
 }
 
 export function setupSocketHandler(io: Server) {
@@ -209,7 +237,7 @@ export function setupSocketHandler(io: Server) {
       }
     });
 
-    socket.on('location_update', (payload) => {
+    socket.on('location_update', async (payload) => {
       const latitude = Number(payload?.latitude);
       const longitude = Number(payload?.longitude);
       const accuracy = Number(payload?.accuracy);
@@ -245,6 +273,11 @@ export function setupSocketHandler(io: Server) {
         isOnline: true
       }, latestLocations.get(user.userId), speedKmh, bearing, bearingAccuracyDegrees) as TrackedLocation;
       latestLocations.set(user.userId, trackedLocation);
+      try {
+        await recoverTrackingStateForUser(user.userId);
+      } catch (error) {
+        console.error('Failed to recover tracking state:', error);
+      }
       appendLocationHistory(trackedLocation);
       void persistLocationHistory(trackedLocation).catch((error) => {
         console.error('Failed to persist location history:', error);

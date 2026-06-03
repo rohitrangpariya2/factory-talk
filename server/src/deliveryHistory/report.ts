@@ -3,6 +3,8 @@ import { StopEvent } from '../stops/stopDetectionService';
 import { buildStopSummary, StopSummary } from '../stops/stopReport';
 import { UserRole } from '../types';
 
+type FactoryBounds = Pick<FactoryZone, 'latitude' | 'longitude' | 'radiusMeters'>;
+
 export type DeliveryHistoryPoint = {
   userId: string;
   name: string;
@@ -88,7 +90,7 @@ export function parseDeliveryHistoryDateRange(
 export function buildDeliveryHistoryReport(
   rawPoints: DeliveryHistoryPoint[],
   date: string,
-  factoryZone: FactoryZone = FACTORY_ZONE,
+  factoryZone: FactoryBounds = FACTORY_ZONE,
   stops: StopEvent[] = []
 ): DeliveryHistoryReport {
   const sorted = rawPoints
@@ -208,11 +210,11 @@ function hasTrustedAccuracy(point: DeliveryHistoryPoint): boolean {
   return !accuracy || accuracy <= MAX_FILTERED_ACCURACY_METERS;
 }
 
-function firstDepartureAt(points: DeliveryHistoryPoint[], factoryZone: FactoryZone): number | undefined {
+function firstDepartureAt(points: DeliveryHistoryPoint[], factoryZone: FactoryBounds): number | undefined {
   return points.find((point) => !isInsideFactoryZone(point, factoryZone))?.locationUpdatedAt;
 }
 
-function returnToFactoryAt(points: DeliveryHistoryPoint[], factoryZone: FactoryZone): number | undefined {
+function returnToFactoryAt(points: DeliveryHistoryPoint[], factoryZone: FactoryBounds): number | undefined {
   let returnStartedAt = 0;
   for (const point of points) {
     if (isInsideFactoryZone(point, factoryZone)) {
@@ -225,7 +227,7 @@ function returnToFactoryAt(points: DeliveryHistoryPoint[], factoryZone: FactoryZ
   return undefined;
 }
 
-function isInsideFactoryZone(point: DeliveryHistoryPoint, factoryZone: FactoryZone): boolean {
+function isInsideFactoryZone(point: DeliveryHistoryPoint, factoryZone: FactoryBounds): boolean {
   return distanceMeters(point.latitude, point.longitude, factoryZone.latitude, factoryZone.longitude) <= factoryZone.radiusMeters;
 }
 

@@ -1,5 +1,5 @@
 import { UserRole } from '../types';
-import { evaluateStopTransition, resetStopDetectionState } from './stopDetectionService';
+import { evaluateStopTransition, recoverStopDetectionStateFromHistory, resetStopDetectionState } from './stopDetectionService';
 
 function point(offsetMs: number, northMeters: number, accuracy = 12) {
   return {
@@ -57,6 +57,21 @@ describe('stop detection state machine', () => {
     expect(evaluateStopTransition(point(7 * 60 * 1000, 50))).toBeNull();
     const stop = evaluateStopTransition(point(7 * 60 * 1000 + 31_000, 52));
 
+    expect(stop?.durationMs).toBe(6 * 60 * 1000);
+  });
+
+  test('recovers active stop after restart and completes it after confirmed movement', () => {
+    recoverStopDetectionStateFromHistory([
+      point(0, 0),
+      point(2 * 60 * 1000, 8),
+      point(6 * 60 * 1000, 12)
+    ]);
+
+    expect(evaluateStopTransition(point(7 * 60 * 1000, 50))).toBeNull();
+    const stop = evaluateStopTransition(point(7 * 60 * 1000 + 31_000, 52));
+
+    expect(stop?.startTime).toBe(1_700_000_000_000);
+    expect(stop?.endTime).toBe(1_700_000_000_000 + 6 * 60 * 1000);
     expect(stop?.durationMs).toBe(6 * 60 * 1000);
   });
 });

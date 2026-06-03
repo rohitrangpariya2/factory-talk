@@ -264,7 +264,8 @@ app.get('/delivery-history/report', async (req, res) => {
     const range = parseDeliveryHistoryDateRange(date, timezoneOffsetMinutes);
     const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
     const stops = await getStopEventsForRange(userId, range.startMs, range.endMs);
-    const report = buildDeliveryHistoryReport(history, range.date, undefined, stops);
+    const factoryZone = await getGeofenceConfig();
+    const report = buildDeliveryHistoryReport(history, range.date, factoryZone, stops);
     res.status(200).json({
       report,
       warning: 'Old reports may be unavailable if location history was cleaned.'
@@ -295,7 +296,8 @@ app.get('/delivery-history/export', async (req, res) => {
     const range = parseDeliveryHistoryDateRange(date, timezoneOffsetMinutes);
     const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
     const stops = await getStopEventsForRange(userId, range.startMs, range.endMs);
-    const report = buildDeliveryHistoryReport(history, range.date, undefined, stops);
+    const factoryZone = await getGeofenceConfig();
+    const report = buildDeliveryHistoryReport(history, range.date, factoryZone, stops);
     const csv = deliveryHistoryReportToCsv(report);
     const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

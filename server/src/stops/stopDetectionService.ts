@@ -99,6 +99,16 @@ export function resetStopDetectionState(): void {
   states.clear();
 }
 
+export function recoverStopDetectionStateFromHistory(history: StopLocation[]): void {
+  history
+    .filter(isTrustedFix)
+    .slice()
+    .sort((left, right) => left.locationUpdatedAt - right.locationUpdatedAt)
+    .forEach((location) => {
+      evaluateStopTransition(location);
+    });
+}
+
 function buildStopEvent(state: StopState): StopEvent {
   const startTime = state.anchor.locationUpdatedAt;
   const endTime = state.lastInside.locationUpdatedAt;

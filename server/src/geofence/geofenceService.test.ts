@@ -1,4 +1,4 @@
-import { evaluateGeofenceTransition, resetGeofenceState } from './geofenceService';
+import { evaluateGeofenceTransition, recoverGeofenceStateFromHistory, resetGeofenceState } from './geofenceService';
 import { GeofenceConfig } from './geofenceConfigService';
 import { UserRole } from '../types';
 
@@ -66,5 +66,33 @@ describe('geofence state machine', () => {
     const event = evaluateGeofenceTransition(location(170, 50_000, 180), config);
 
     expect(event).toBeNull();
+  });
+
+  test('recovers pending exit confirmation after restart from recent accepted history', () => {
+    recoverGeofenceStateFromHistory([
+      location(0, 1_000),
+      location(140, 10_000)
+    ], config);
+
+    const event = evaluateGeofenceTransition(location(145, 41_000), config);
+
+    expect(event?.eventType).toBe('EXIT');
+    expect(event?.timestamp).toBe(41_000);
+  });
+
+  test('recovers outside presence after restart without duplicate exit alerts', () => {
+    recoverGeofenceStateFromHistory([
+      location(0, 1_000),
+      location(140, 10_000),
+      location(145, 41_000)
+    ], config);
+
+    const duplicate = evaluateGeofenceTransition(location(150, 80_000), config);
+    const pendingEntry = evaluateGeofenceTransition(location(55, 112_000), config);
+    const entry = evaluateGeofenceTransition(location(55, 143_000), config);
+
+    expect(duplicate).toBeNull();
+    expect(pendingEntry).toBeNull();
+    expect(entry?.eventType).toBe('ENTRY');
   });
 });

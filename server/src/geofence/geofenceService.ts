@@ -74,6 +74,19 @@ export function resetGeofenceState(): void {
   states.clear();
 }
 
+export function recoverGeofenceStateFromHistory(
+  history: GeofenceLocation[],
+  config: GeofenceConfig
+): void {
+  history
+    .filter((location) => isTrustedFix(location, config))
+    .slice()
+    .sort((left, right) => left.locationUpdatedAt - right.locationUpdatedAt)
+    .forEach((location) => {
+      evaluateGeofenceTransition(location, config);
+    });
+}
+
 function confirmTransition(
   location: GeofenceLocation,
   config: GeofenceConfig,
