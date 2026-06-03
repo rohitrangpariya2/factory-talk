@@ -11,6 +11,9 @@ describe('road match API route source', () => {
     expect(indexSource).toContain('if (result.coordinates.length < 2)');
     expect(indexSource).toContain('roadMatchCache.get(key)');
     expect(indexSource).toContain('buildOsrmMatchUrl(prepared)');
-    expect(indexSource).toContain('parseOsrmMatchResponse');
+    expect(indexSource).toContain('parseOsrmMatchResult');
+    expect(indexSource).toContain('segments: matched.segments');
+    expect(indexSource).toContain('confidence: matched.confidence');
+    expect(indexSource).toContain('unmatchedGapsCount: matched.unmatchedGapsCount');
   });
 });

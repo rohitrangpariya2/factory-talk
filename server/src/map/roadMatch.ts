@@ -29,8 +29,18 @@ export type RoadMatchCoordinate = {
 export type RoadMatchResult = {
   status: 'matched' | 'fallback';
   coordinates: RoadMatchCoordinate[];
+  segments: RoadMatchCoordinate[][];
   distanceMeters: number;
+  confidence?: number;
+  unmatchedGapsCount?: number;
   reason?: string;
+};
+
+export type ParsedOsrmMatchResult = {
+  coordinates: RoadMatchCoordinate[];
+  segments: RoadMatchCoordinate[][];
+  confidence: number;
+  unmatchedGapsCount: number;
 };
 
 export function distanceMeters(a: RoadMatchCoordinate, b: RoadMatchCoordinate): number {
@@ -132,23 +142,46 @@ export function buildOsrmMatchUrl(points: PreparedRoadMatchPoint[]): string {
   return `${OSRM_MATCH_BASE_URL}${coordinates}?${params.toString()}`;
 }
 
-export function parseOsrmMatchResponse(data: unknown): RoadMatchCoordinate[] {
+export function parseOsrmMatchResult(data: unknown): ParsedOsrmMatchResult {
   const body = data as {
     code?: string;
-    matchings?: Array<{ geometry?: { coordinates?: unknown } }>;
+    matchings?: Array<{ confidence?: number; geometry?: { coordinates?: unknown } }>;
+    tracepoints?: unknown[];
   };
-  if (!body || body.code !== 'Ok' || !Array.isArray(body.matchings)) return [];
+  if (!body || body.code !== 'Ok' || !Array.isArray(body.matchings)) {
+    return { coordinates: [], segments: [], confidence: 0, unmatchedGapsCount: 0 };
+  }
 
-  return body.matchings
-    .flatMap((matching) => Array.isArray(matching.geometry?.coordinates) ? matching.geometry.coordinates : [])
-    .map((coordinate) => {
-      const pair = coordinate as unknown[];
-      return {
-        latitude: Number(pair[1]),
-        longitude: Number(pair[0])
-      };
+  const confidences: number[] = [];
+  const segments = body.matchings
+    .map((matching) => {
+      const confidence = Number(matching.confidence);
+      if (Number.isFinite(confidence)) confidences.push(confidence);
+      return (Array.isArray(matching.geometry?.coordinates) ? matching.geometry.coordinates : [])
+        .map((coordinate) => {
+          const pair = coordinate as unknown[];
+          return {
+            latitude: Number(pair[1]),
+            longitude: Number(pair[0])
+          };
+        })
+        .filter((coordinate) => Number.isFinite(coordinate.latitude) && Number.isFinite(coordinate.longitude));
     })
-    .filter((coordinate) => Number.isFinite(coordinate.latitude) && Number.isFinite(coordinate.longitude));
+    .filter((segment) => segment.length >= 2);
+
+  const coordinates = segments.flat();
+  const confidence = confidences.length
+    ? confidences.reduce((total, value) => total + value, 0) / confidences.length
+    : (segments.length ? 1 : 0);
+  const nullTracepoints = Array.isArray(body.tracepoints)
+    ? body.tracepoints.filter((tracepoint) => tracepoint === null).length
+    : 0;
+  const unmatchedGapsCount = Math.max(0, segments.length - 1) + nullTracepoints;
+  return { coordinates, segments, confidence, unmatchedGapsCount };
+}
+
+export function parseOsrmMatchResponse(data: unknown): RoadMatchCoordinate[] {
+  return parseOsrmMatchResult(data).coordinates;
 }
 
 export function buildRoadMatchFallback(points: PreparedRoadMatchPoint[], reason: string): RoadMatchResult {
@@ -160,7 +193,10 @@ export function buildRoadMatchFallback(points: PreparedRoadMatchPoint[], reason:
     status: 'fallback',
     reason,
     distanceMeters: coordinateDistanceMeters(coordinates),
-    coordinates
+    coordinates,
+    segments: coordinates.length >= 2 ? [coordinates] : [],
+    confidence: 0,
+    unmatchedGapsCount: 0
   };
 }
 

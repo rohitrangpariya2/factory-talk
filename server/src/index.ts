@@ -14,7 +14,7 @@ import {
   buildOsrmMatchUrl,
   buildRoadMatchFallback,
   coordinateDistanceMeters,
-  parseOsrmMatchResponse,
+  parseOsrmMatchResult,
   prepareRoadMatchPoints,
   roadMatchCacheKey,
   type RoadMatchInputPoint,
@@ -202,9 +202,16 @@ async function buildRoadMatchResponse(points: RoadMatchInputPoint[]): Promise<Ro
     if (!matchResponse.ok) {
       result = buildRoadMatchFallback(prepared, `OSRM match failed with ${matchResponse.status}`);
     } else {
-      const matched = parseOsrmMatchResponse(await matchResponse.json());
-      result = matched.length >= 2
-        ? { status: 'matched', coordinates: matched, distanceMeters: coordinateDistanceMeters(matched) }
+      const matched = parseOsrmMatchResult(await matchResponse.json());
+      result = matched.coordinates.length >= 2
+        ? {
+            status: 'matched',
+            coordinates: matched.coordinates,
+            segments: matched.segments,
+            distanceMeters: coordinateDistanceMeters(matched.coordinates),
+            confidence: matched.confidence,
+            unmatchedGapsCount: matched.unmatchedGapsCount
+          }
         : buildRoadMatchFallback(prepared, 'OSRM match returned no usable geometry');
     }
   } catch (error) {
@@ -594,6 +601,22 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     .muted { color: #c7ccd8; font-size: 13px; }
     .status { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; }
     .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .route-debug-overlay {
+      position: fixed;
+      left: 12px;
+      top: 74px;
+      z-index: 999;
+      display: none;
+      max-width: 390px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: rgba(15, 23, 42, .82);
+      color: #cbd5e1;
+      font-size: 11px;
+      font-weight: 800;
+      box-shadow: 0 6px 20px rgba(0,0,0,.22);
+      backdrop-filter: blur(8px);
+    }
     .user {
       padding: 10px;
       border-radius: 8px;
@@ -1110,6 +1133,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
   <div id="map"></div>
   <div id="deviationAlertBanner" class="deviation-banner">âš ï¸ ALERT: Driver deviated from the planned route!</div>
   <div id="geofenceEventBanner" class="geofence-event-banner"></div>
+  <div id="routeDebugOverlay" class="route-debug-overlay"></div>
   <div class="topbar">
     <div>
       <div class="title">Factory Talk Live Map</div>
@@ -1169,6 +1193,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const liveRouteDebug = new Map();
     window.__factoryTalkLiveRouteDebug = liveRouteDebug;
     const liveRouteInflight = new Set();
+    const liveMatchedSegments = new Map();
+    const liveRouteDisplaySignatures = new Map();
     const activeTripSuggestedCache = new Map();
     
     function areWaypointsEqual(wps1, wps2) {
@@ -1668,14 +1694,105 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       ].join(':');
     }
 
+    function routeSegmentsSignature(routeSegments) {
+      return routeSegments
+        .map((segment) => segment
+          .map((latLng) => Number(latLng[0]).toFixed(5) + ',' + Number(latLng[1]).toFixed(5))
+          .join('|'))
+        .join('||');
+    }
+
+    function flattenRouteSegments(routeSegments) {
+      return routeSegments.reduce((all, segment) => all.concat(segment), []);
+    }
+
+    function normalizeDisplayRouteSegments(routeSegments) {
+      return routeSegments
+        .map((segment) => (Array.isArray(segment) ? segment : [])
+          .map((latLng) => [Number(latLng[0]), Number(latLng[1])])
+          .filter((latLng) => Number.isFinite(latLng[0]) && Number.isFinite(latLng[1])))
+        .filter((segment) => segment.length >= 2);
+    }
+
+    function routeLatLngsForLeaflet(routeSegments) {
+      if (routeSegments.length === 1) return routeSegments[0];
+      return routeSegments;
+    }
+
+    function roadSegmentsFromMatchedRoute(roadLatLngs) {
+      const roadSegments = Array.isArray(roadLatLngs.roadSegments)
+        ? roadLatLngs.roadSegments
+        : [roadLatLngs];
+      return normalizeDisplayRouteSegments(roadSegments);
+    }
+
+    function setLiveRouteLatLngs(key, routeSegments, source) {
+      const cleanSegments = normalizeDisplayRouteSegments(routeSegments);
+      if (!cleanSegments.length) return false;
+      const signature = source + ':' + routeSegmentsSignature(cleanSegments);
+      if (liveRouteDisplaySignatures.get(key) === signature) return true;
+      liveRouteDisplaySignatures.set(key, signature);
+      const latLngs = routeLatLngsForLeaflet(cleanSegments);
+      const color = LIVE_TRAIL_COLOR;
+      if (!historyLineCasings.has(key)) {
+        historyLineCasings.set(key, L.polyline(latLngs, {
+          color: LIVE_TRAIL_OUTLINE_COLOR,
+          weight: 8,
+          opacity: 0.92,
+          lineCap: 'round',
+          lineJoin: 'round'
+        }).addTo(map));
+      } else {
+        historyLineCasings.get(key).setLatLngs(latLngs);
+        historyLineCasings.get(key).setStyle({ color: LIVE_TRAIL_OUTLINE_COLOR, weight: 8, opacity: 0.92 });
+      }
+      if (!historyLines.has(key)) {
+        historyLines.set(key, L.polyline(latLngs, {
+          color,
+          weight: 5,
+          opacity: 0.95,
+          lineCap: 'round',
+          lineJoin: 'round'
+        }).addTo(map));
+      } else {
+        historyLines.get(key).setLatLngs(latLngs);
+        historyLines.get(key).setStyle({ color, weight: 5, opacity: 0.95 });
+      }
+      return true;
+    }
+
+    function renderLiveRouteDebugOverlay() {
+      const overlay = document.getElementById('routeDebugOverlay');
+      if (!overlay) return;
+      const selectedKey = selectedTimelineUserId || userId;
+      const entry = liveRouteDebug.get(selectedKey) || liveRouteDebug.values().next().value;
+      if (!entry) {
+        overlay.style.display = 'none';
+        overlay.textContent = '';
+        return;
+      }
+      overlay.style.display = 'block';
+      overlay.textContent =
+        'Route: ' + entry.routeSource +
+        ' | confidence: ' + (Number.isFinite(Number(entry.matchConfidence)) ? Number(entry.matchConfidence).toFixed(2) : '--') +
+        ' | matched: ' + entry.matchedGeometryPoints +
+        ' | raw: ' + entry.rawGpsPoints +
+        ' | gaps: ' + entry.unmatchedGapsCount +
+        (entry.fallbackReason ? ' | ' + entry.fallbackReason : '');
+    }
+
     function updateLiveRouteDebug(key, details) {
       liveRouteDebug.set(key, {
         routeSource: details.routeSource,
         matchedGeometryPoints: details.matchedGeometryPoints || 0,
         rawGpsPoints: details.rawGpsPoints || 0,
+        matchConfidence: details.matchConfidence,
+        unmatchedGapsCount: details.unmatchedGapsCount || 0,
+        fallbackReason: details.fallbackReason || '',
         lastMatchStatus: details.lastMatchStatus || details.routeSource,
         updatedAt: Date.now()
       });
+      renderLiveRouteDebugOverlay();
     }
 
     function updateHistory(points) {
@@ -1693,96 +1810,105 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         const segments = splitStableRouteSegments(trailPoints);
         if (!segments.length) return;
 
-        const rawSegmentLatLngs = segments.map((segmentPoints) =>
-          segmentPoints.map((point) => [point.latitude, point.longitude])
-        );
-        const latLngs = rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs;
-        updateLiveRouteDebug(key, {
-          routeSource: 'raw_gps',
-          matchedGeometryPoints: 0,
-          rawGpsPoints: trailPoints.length,
-          lastMatchStatus: 'raw_gps'
-        });
-        const color = LIVE_TRAIL_COLOR;
-        if (!historyLineCasings.has(key)) {
-          historyLineCasings.set(key, L.polyline(latLngs, {
-            color: LIVE_TRAIL_OUTLINE_COLOR,
-            weight: 8,
-            opacity: 0.92,
-            lineCap: 'round',
-            lineJoin: 'round'
-          }).addTo(map));
-        } else {
-          historyLineCasings.get(key).setLatLngs(latLngs);
-          historyLineCasings.get(key).setStyle({ color: LIVE_TRAIL_OUTLINE_COLOR, weight: 8, opacity: 0.92 });
-        }
-        if (!historyLines.has(key)) {
-          historyLines.set(key, L.polyline(latLngs, {
-            color,
-            weight: 5,
-            opacity: 0.95,
-            lineCap: 'round',
-            lineJoin: 'round'
-          }).addTo(map));
-        } else {
-          historyLines.get(key).setLatLngs(latLngs);
-          historyLines.get(key).setStyle({ color, weight: 5, opacity: 0.95 });
-        }
-
-        segments.forEach((segmentPoints, segmentIndex) => {
+        const segmentEntries = segments.map((segmentPoints, segmentIndex) => {
           const roadPoints = sampleRoadTrailPoints(segmentPoints);
-          if (roadPoints.length < 2) return;
           const distanceCacheKey = roadRouteCacheKey(roadPoints, key + ':live:' + segmentIndex);
           const routeCacheKey = liveRouteCacheKey(roadPoints, key + ':live:' + segmentIndex);
-          const cachedRoute = tripRouteCache.get(routeCacheKey);
-          if (cachedRoute && cachedRoute.length > 1) {
-            rememberRoadDistance(distanceCacheKey, cachedRoute);
-            rawSegmentLatLngs[segmentIndex] = cachedRoute;
-            const nextLatLngs = rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs;
-            const casing = historyLineCasings.get(key);
-            if (casing) casing.setLatLngs(nextLatLngs);
-            const line = historyLines.get(key);
-            if (line) line.setLatLngs(nextLatLngs);
+          return { segmentPoints, segmentIndex, roadPoints, distanceCacheKey, routeCacheKey };
+        });
+
+        function applyMatchedLiveRoute(fallbackReason) {
+          const matchedRouteSegments = [];
+          let matchedGeometryPoints = 0;
+          let rawGpsPoints = 0;
+          let confidenceTotal = 0;
+          let confidenceCount = 0;
+          let unmatchedGapsCount = 0;
+
+          segmentEntries.forEach((entry) => {
+            rawGpsPoints += entry.segmentPoints.length;
+            const cachedRoute = tripRouteCache.get(entry.routeCacheKey);
+            if (!cachedRoute || cachedRoute.roadMatchStatus !== 'matched') return;
+            const roadSegments = roadSegmentsFromMatchedRoute(cachedRoute);
+            if (!roadSegments.length) return;
+            roadSegments.forEach((segment) => matchedRouteSegments.push(segment));
+            matchedGeometryPoints += flattenRouteSegments(roadSegments).length;
+            const confidence = Number(cachedRoute.roadMatchConfidence);
+            if (Number.isFinite(confidence)) {
+              confidenceTotal += confidence;
+              confidenceCount += 1;
+            }
+            unmatchedGapsCount += Number(cachedRoute.unmatchedGapsCount || Math.max(0, roadSegments.length - 1));
+          });
+
+          if (matchedRouteSegments.length) {
+            liveMatchedSegments.set(key, matchedRouteSegments);
+            setLiveRouteLatLngs(key, matchedRouteSegments, 'road_matched');
             updateLiveRouteDebug(key, {
               routeSource: 'road_matched',
-              matchedGeometryPoints: cachedRoute.length,
-              rawGpsPoints: segmentPoints.length,
-              lastMatchStatus: cachedRoute.roadMatchStatus || 'matched'
+              matchedGeometryPoints,
+              rawGpsPoints,
+              matchConfidence: confidenceCount ? confidenceTotal / confidenceCount : undefined,
+              unmatchedGapsCount,
+              fallbackReason: fallbackReason || '',
+              lastMatchStatus: 'matched'
             });
+            return true;
+          }
+
+          const previousGoodSegments = liveMatchedSegments.get(key);
+          if (previousGoodSegments && previousGoodSegments.length) {
+            setLiveRouteLatLngs(key, previousGoodSegments, 'road_matched_previous');
+            updateLiveRouteDebug(key, {
+              routeSource: 'road_matched',
+              matchedGeometryPoints: flattenRouteSegments(previousGoodSegments).length,
+              rawGpsPoints,
+              unmatchedGapsCount: 0,
+              fallbackReason: fallbackReason || 'keeping previous good route',
+              lastMatchStatus: 'previous_good_match'
+            });
+            return true;
+          }
+
+          const rawFallbackSegments = segments.map((segmentPoints) =>
+            segmentPoints.map((point) => [point.latitude, point.longitude])
+          );
+          setLiveRouteLatLngs(key, rawFallbackSegments, 'raw_gps');
+          updateLiveRouteDebug(key, {
+            routeSource: 'raw_gps',
+            matchedGeometryPoints: 0,
+            rawGpsPoints,
+            unmatchedGapsCount: Math.max(0, rawFallbackSegments.length - 1),
+            fallbackReason: fallbackReason || 'waiting for road match',
+            lastMatchStatus: 'raw_gps'
+          });
+          return false;
+        }
+
+        applyMatchedLiveRoute('');
+
+        segmentEntries.forEach((entry) => {
+          if (entry.roadPoints.length < 2) return;
+          const cachedRoute = tripRouteCache.get(entry.routeCacheKey);
+          if (cachedRoute && cachedRoute.roadMatchStatus === 'matched') {
+            rememberRoadDistance(entry.distanceCacheKey, cachedRoute);
             return;
           }
-          if (liveRouteInflight.has(routeCacheKey)) return;
-          liveRouteInflight.add(routeCacheKey);
-          fetchRoadLatLngs(roadPoints)
+          if (liveRouteInflight.has(entry.routeCacheKey)) return;
+          liveRouteInflight.add(entry.routeCacheKey);
+          fetchRoadLatLngs(entry.roadPoints)
             .then((roadLatLngs) => {
-              if (roadLatLngs.length > 1) {
-                tripRouteCache.set(routeCacheKey, roadLatLngs);
-                rememberRoadDistance(distanceCacheKey, roadLatLngs);
-                rawSegmentLatLngs[segmentIndex] = roadLatLngs;
-                const nextLatLngs = rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs;
-                const casing = historyLineCasings.get(key);
-                if (casing) casing.setLatLngs(nextLatLngs);
-                const line = historyLines.get(key);
-                if (line) line.setLatLngs(nextLatLngs);
-                updateLiveRouteDebug(key, {
-                  routeSource: roadLatLngs.roadMatchStatus === 'matched' ? 'road_matched' : 'raw_gps',
-                  matchedGeometryPoints: roadLatLngs.length,
-                  rawGpsPoints: segmentPoints.length,
-                  lastMatchStatus: roadLatLngs.roadMatchStatus
-                });
+              if (roadLatLngs.length > 1 && roadLatLngs.roadMatchStatus === 'matched') {
+                tripRouteCache.set(entry.routeCacheKey, roadLatLngs);
+                rememberRoadDistance(entry.distanceCacheKey, roadLatLngs);
+                applyMatchedLiveRoute('');
               }
             })
-            .catch(() => {
-              // Keep filtered raw GPS path when road snapping fails.
-              updateLiveRouteDebug(key, {
-                routeSource: 'raw_gps',
-                matchedGeometryPoints: 0,
-                rawGpsPoints: segmentPoints.length,
-                lastMatchStatus: 'fallback'
-              });
+            .catch((error) => {
+              applyMatchedLiveRoute(error instanceof Error ? error.message : 'Road match failed');
             })
             .finally(() => {
-              liveRouteInflight.delete(routeCacheKey);
+              liveRouteInflight.delete(entry.routeCacheKey);
             });
         });
       });
@@ -1795,6 +1921,9 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           map.removeLayer(line);
           historyLines.delete(key);
           liveRouteDebug.delete(key);
+          liveMatchedSegments.delete(key);
+          liveRouteDisplaySignatures.delete(key);
+          renderLiveRouteDebugOverlay();
         }
       });
     }

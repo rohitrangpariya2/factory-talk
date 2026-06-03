@@ -1,6 +1,7 @@
 import {
   buildOsrmMatchUrl,
   buildRoadMatchFallback,
+  parseOsrmMatchResult,
   parseOsrmMatchResponse,
   prepareRoadMatchPoints
 } from './roadMatch';
@@ -42,7 +43,7 @@ describe('road match helpers', () => {
     );
   });
 
-  test('parses OSRM matchings into latitude longitude coordinates', () => {
+  test('parses OSRM matchings into usable latitude longitude coordinates', () => {
     const matched = parseOsrmMatchResponse({
       code: 'Ok',
       matchings: [
@@ -64,9 +65,49 @@ describe('road match helpers', () => {
 
     expect(matched).toEqual([
       { latitude: 21.259843, longitude: 72.938618 },
-      { latitude: 21.26, longitude: 72.939 },
-      { latitude: 21.261, longitude: 72.94 }
+      { latitude: 21.26, longitude: 72.939 }
     ]);
+  });
+
+  test('preserves OSRM matching segments so partial matches do not get connected', () => {
+    const matched = parseOsrmMatchResult({
+      code: 'Ok',
+      tracepoints: [{}, null, {}],
+      matchings: [
+        {
+          confidence: 0.92,
+          geometry: {
+            coordinates: [
+              [72.938618, 21.259843],
+              [72.939000, 21.260000]
+            ]
+          }
+        },
+        {
+          confidence: 0.7,
+          geometry: {
+            coordinates: [
+              [72.950000, 21.270000],
+              [72.951000, 21.271000]
+            ]
+          }
+        }
+      ]
+    });
+
+    expect(matched.segments).toEqual([
+      [
+        { latitude: 21.259843, longitude: 72.938618 },
+        { latitude: 21.26, longitude: 72.939 }
+      ],
+      [
+        { latitude: 21.27, longitude: 72.95 },
+        { latitude: 21.271, longitude: 72.951 }
+      ]
+    ]);
+    expect(matched.coordinates).toHaveLength(4);
+    expect(matched.confidence).toBeCloseTo(0.81);
+    expect(matched.unmatchedGapsCount).toBe(2);
   });
 
   test('returns cleaned fallback coordinates when match data is empty', () => {
@@ -82,6 +123,14 @@ describe('road match helpers', () => {
       status: 'fallback',
       reason: 'OSRM returned NoMatch',
       distanceMeters: expect.any(Number),
+      segments: [
+        [
+          { latitude: 21.259843, longitude: 72.938618 },
+          { latitude: 21.260123, longitude: 72.939988 }
+        ]
+      ],
+      confidence: 0,
+      unmatchedGapsCount: 0,
       coordinates: [
         { latitude: 21.259843, longitude: 72.938618 },
         { latitude: 21.260123, longitude: 72.939988 }

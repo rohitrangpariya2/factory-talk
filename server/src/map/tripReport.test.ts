@@ -134,16 +134,45 @@ describe('factory trip report map script', () => {
     expect(indexSource).not.toContain('applyRoadTrail(key, trailPoints');
   });
 
-  test('live blue route displays matched geometry with raw GPS fallback and debug metadata', () => {
+  test('live blue route displays segmented matched geometry with debug metadata', () => {
     expect(indexSource).toContain('const liveRouteDebug = new Map()');
+    expect(indexSource).toContain('const liveMatchedSegments = new Map()');
+    expect(indexSource).toContain('const liveRouteDisplaySignatures = new Map()');
     expect(indexSource).toContain("routeSource: 'raw_gps'");
     expect(indexSource).toContain("routeSource: 'road_matched'");
-    expect(indexSource).toContain('matchedGeometryPoints: roadLatLngs.length');
-    expect(indexSource).toContain('rawGpsPoints: segmentPoints.length');
-    expect(indexSource).toContain('lastMatchStatus: roadLatLngs.roadMatchStatus');
+    expect(indexSource).toContain('function setLiveRouteLatLngs(key, routeSegments, source)');
+    expect(indexSource).toContain('function roadSegmentsFromMatchedRoute(roadLatLngs)');
+    expect(indexSource).toContain('roadLatLngs.roadSegments');
+    expect(indexSource).toContain('matchConfidence: details.matchConfidence');
+    expect(indexSource).toContain('unmatchedGapsCount: details.unmatchedGapsCount || 0');
+    expect(indexSource).toContain('fallbackReason: details.fallbackReason ||');
     expect(indexSource).toContain('window.__factoryTalkLiveRouteDebug');
-    expect(indexSource).toContain('line.setLatLngs(nextLatLngs)');
-    expect(indexSource).toContain('casing.setLatLngs(nextLatLngs)');
+    expect(indexSource).toContain('id="routeDebugOverlay"');
+    expect(indexSource).toContain('Route: ');
+  });
+
+  test('live route does not mix raw GPS with matched geometry', () => {
+    expect(indexSource).toContain('const matchedRouteSegments = []');
+    expect(indexSource).toContain('roadSegments.forEach((segment) => matchedRouteSegments.push(segment))');
+    expect(indexSource).toContain("setLiveRouteLatLngs(key, matchedRouteSegments, 'road_matched')");
+    expect(indexSource).not.toContain('rawSegmentLatLngs[segmentIndex] =');
+    expect(indexSource).not.toContain('const nextLatLngs = rawSegmentLatLngs.length');
+  });
+
+  test('partial OSRM match and large GPS gaps stay as separate route segments', () => {
+    expect(indexSource).toContain('function routeLatLngsForLeaflet(routeSegments)');
+    expect(indexSource).toContain('if (routeSegments.length === 1) return routeSegments[0]');
+    expect(indexSource).toContain('return routeSegments');
+    expect(indexSource).toContain('unmatchedGapsCount += Number(cachedRoute.unmatchedGapsCount || Math.max(0, roadSegments.length - 1))');
+    expect(indexSource).toContain('deltaMs > ROUTE_SEGMENT_BREAK_GAP_MS');
+  });
+
+  test('previous good live road match remains visible when the next match fails', () => {
+    expect(indexSource).toContain('liveMatchedSegments.set(key, matchedRouteSegments)');
+    expect(indexSource).toContain('const previousGoodSegments = liveMatchedSegments.get(key)');
+    expect(indexSource).toContain("setLiveRouteLatLngs(key, previousGoodSegments, 'road_matched_previous')");
+    expect(indexSource).toContain("lastMatchStatus: 'previous_good_match'");
+    expect(indexSource).toContain("applyMatchedLiveRoute(error instanceof Error ? error.message : 'Road match failed')");
   });
 
   test('live route cache key changes when newer GPS points arrive', () => {
