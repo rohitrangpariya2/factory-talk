@@ -511,6 +511,20 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       background: rgba(148,163,184,.14);
       color: #cbd5e1;
     }
+    .live-stop-marker {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #f97316;
+      color: #ffffff;
+      border: 2px solid #ffffff;
+      box-shadow: 0 3px 12px rgba(15,23,42,.42);
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1;
+    }
     .panel {
       left: 12px;
       right: 12px;
@@ -1103,6 +1117,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     </div>
     <div class="map-actions">
       <button type="button" class="follow-button" id="followLiveButton" onclick="toggleFollowLive()">Follow Live ON</button>
+      <button type="button" class="follow-button" id="showStopsButton" onclick="toggleStopMarkers()">Show Stops ON</button>
       <div class="status"><span class="dot" id="serverDot"></span><span id="serverText">Connecting</span></div>
     </div>
   </div>
@@ -2205,6 +2220,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
                 latitude: stopAnchor.latitude,
                 longitude: stopAnchor.longitude,
                 startTime: stopStart,
+                endTime: Number(current.locationUpdatedAt || 0),
                 durationMs: duration
               });
             }
@@ -2222,6 +2238,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
             latitude: stopAnchor.latitude,
             longitude: stopAnchor.longitude,
             startTime: stopStart,
+            endTime: Number(last.locationUpdatedAt || 0),
             durationMs: duration
           });
         }
@@ -2406,7 +2423,11 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           [stop.latitude, stop.longitude],
           '#ef4444',
           'Stop ' + (stopIndex + 1),
-          formatDuration(stop.durationMs) + ' ubho ryo'
+          'Duration: ' + formatDuration(stop.durationMs) +
+            ' | ' +
+            'Start: ' + formatClock(stop.startTime) +
+            ' | ' +
+            'End: ' + (stop.endTime ? formatClock(stop.endTime) : 'Still stopped')
         );
       });
 

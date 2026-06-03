@@ -72,6 +72,14 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('duration >= STOP_MIN_DURATION_MS');
   });
 
+  test('selected trip stop labels include duration and start/end time', () => {
+    expect(indexSource).toContain('endTime: Number(current.locationUpdatedAt || 0)');
+    expect(indexSource).toContain('endTime: Number(last.locationUpdatedAt || 0)');
+    expect(indexSource).toContain("'Duration: ' + formatDuration(stop.durationMs)");
+    expect(indexSource).toContain("'Start: ' + formatClock(stop.startTime)");
+    expect(indexSource).toContain("'End: ' + (stop.endTime ? formatClock(stop.endTime) : 'Still stopped')");
+  });
+
   test('does not draw selected trip routes from raw GPS points', () => {
     expect(indexSource).toContain('function roadRouteCacheKey(points, fallbackKey)');
     expect(indexSource).toContain('function setSelectedHistoryLineVisible(visible)');
