@@ -19,6 +19,13 @@ class StartupReceiver : BroadcastReceiver() {
             action == Constants.ACTION_START_SERVICE
         ) {
             ReminderScheduler.scheduleNext(context)
+            AutoTrackingScheduler.schedule(context)
+            if (
+                prefs.getBoolean(Constants.PREF_AUTO_TRACKING_ENABLED, false) &&
+                AutoTrackingScheduler.isWithinTrackingWindow()
+            ) {
+                AutoTrackingScheduler.startService(context, Constants.ACTION_AUTO_TRACKING_START)
+            }
             if (!prefs.getBoolean(Constants.PREF_WALKIE_ENABLED, true)) return
 
             val serviceIntent = Intent(context, TalkForegroundService::class.java).apply {

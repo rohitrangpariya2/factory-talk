@@ -79,6 +79,11 @@
             android:enabled="true"
             android:exported="false" />
 
+        <receiver
+            android:name=".service.AutoTrackingReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
     </application>
 
 </manifest>

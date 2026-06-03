@@ -53,8 +53,10 @@ import com.factorytalk.app.data.model.ChannelType
 import com.factorytalk.app.data.model.User
 import com.factorytalk.app.data.remote.SignalingClient
 import com.factorytalk.app.data.repository.ChannelRepository
+import com.factorytalk.app.service.AutoTrackingScheduler
 import com.factorytalk.app.service.ReminderScheduler
 import com.factorytalk.app.service.TalkForegroundService
+import com.factorytalk.app.util.BatteryOptimizationHelper
 import com.factorytalk.app.util.Constants
 import com.factorytalk.app.util.PermissionHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -157,6 +159,9 @@ fun AdminScreen(
     var pinMessage by remember { mutableStateOf("") }
     var allowAudioDuringCall by remember { mutableStateOf(false) }
     var locationSharingEnabled by remember { mutableStateOf(false) }
+    var autoTrackingEnabled by remember { mutableStateOf(false) }
+    var autoTrackingStatus by remember { mutableStateOf("") }
+    var batteryOptimizationEnabled by remember { mutableStateOf(false) }
     var lastLocationSentAt by remember { mutableStateOf(0L) }
     var locationStatus by remember { mutableStateOf("") }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -164,6 +169,9 @@ fun AdminScreen(
     fun refreshPhoneControlState() {
         allowAudioDuringCall = prefs.getBoolean(Constants.PREF_ALLOW_AUDIO_DURING_CALL, false)
         locationSharingEnabled = prefs.getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
+        autoTrackingEnabled = prefs.getBoolean(Constants.PREF_AUTO_TRACKING_ENABLED, false)
+        autoTrackingStatus = prefs.getString(Constants.PREF_AUTO_TRACKING_STATUS, "") ?: ""
+        batteryOptimizationEnabled = !BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
         lastLocationSentAt = prefs.getLong(Constants.PREF_LAST_LOCATION_SENT_AT, 0L)
         locationStatus = prefs.getString(Constants.PREF_LOCATION_STATUS, "") ?: ""
     }
@@ -284,6 +292,9 @@ fun AdminScreen(
                 PhoneControlsCard(
                     allowAudioDuringCall = allowAudioDuringCall,
                     locationSharingEnabled = locationSharingEnabled,
+                    autoTrackingEnabled = autoTrackingEnabled,
+                    autoTrackingStatus = autoTrackingStatus,
+                    batteryOptimizationEnabled = batteryOptimizationEnabled,
                     lastLocationSentAt = lastLocationSentAt,
                     locationStatus = locationStatus,
                     onAllowAudioDuringCallChanged = { checked ->
@@ -302,8 +313,35 @@ fun AdminScreen(
                         }
                         startTalkService(context)
                     },
+                    onAutoTrackingChanged = { checked ->
+                        autoTrackingEnabled = checked
+                        autoTrackingStatus = if (checked) {
+                            AutoTrackingScheduler.statusForNow(AutoTrackingScheduler.isWithinTrackingWindow())
+                        } else {
+                            "Auto Tracking OFF"
+                        }
+                        prefs.edit()
+                            .putBoolean(Constants.PREF_AUTO_TRACKING_ENABLED, checked)
+                            .putString(Constants.PREF_AUTO_TRACKING_STATUS, autoTrackingStatus)
+                            .apply()
+                        if (checked) {
+                            AutoTrackingScheduler.schedule(context)
+                            if (!PermissionHelper.hasLocationPermission(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                requestLocationPermission(context)
+                            }
+                            if (AutoTrackingScheduler.isWithinTrackingWindow()) {
+                                AutoTrackingScheduler.startService(context, Constants.ACTION_AUTO_TRACKING_START)
+                            }
+                        } else {
+                            AutoTrackingScheduler.cancel(context)
+                            AutoTrackingScheduler.startService(context, Constants.ACTION_AUTO_TRACKING_STOP)
+                        }
+                    },
                     onOpenLocationSettings = {
                         context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                    },
+                    onOpenBatterySettings = {
+                        BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
                     }
                 )
             }
@@ -446,11 +484,16 @@ fun AdminScreen(
 private fun PhoneControlsCard(
     allowAudioDuringCall: Boolean,
     locationSharingEnabled: Boolean,
+    autoTrackingEnabled: Boolean,
+    autoTrackingStatus: String,
+    batteryOptimizationEnabled: Boolean,
     lastLocationSentAt: Long,
     locationStatus: String,
     onAllowAudioDuringCallChanged: (Boolean) -> Unit,
     onLocationSharingChanged: (Boolean) -> Unit,
-    onOpenLocationSettings: () -> Unit
+    onAutoTrackingChanged: (Boolean) -> Unit,
+    onOpenLocationSettings: () -> Unit,
+    onOpenBatterySettings: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -485,7 +528,7 @@ private fun PhoneControlsCard(
             Spacer(modifier = Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Duty location sharing", fontWeight = FontWeight.Bold)
+                    Text("Manual duty location sharing", fontWeight = FontWeight.Bold)
                     Text(
                         text = if (locationSharingEnabled) {
                             if (lastLocationSentAt > 0L) {
@@ -506,7 +549,42 @@ private fun PhoneControlsCard(
                     onCheckedChange = onLocationSharingChanged
                 )
             }
-            if (locationSharingEnabled && lastLocationSentAt == 0L) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Auto Tracking", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (autoTrackingEnabled) {
+                            val status = autoTrackingStatus.ifBlank { "Scheduled" }
+                            "Auto Tracking ON. Scheduled: 9:00 AM - 8:00 PM. $status."
+                        } else {
+                            "Auto Tracking OFF. Phone will not start GPS automatically."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = autoTrackingEnabled,
+                    onCheckedChange = onAutoTrackingChanged
+                )
+            }
+            if (batteryOptimizationEnabled) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Battery optimization is enabled. Auto tracking may be delayed by Android.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onOpenBatterySettings,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Open Battery Optimization Settings")
+                }
+            }
+            if ((locationSharingEnabled || autoTrackingEnabled) && lastLocationSentAt == 0L) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
                     onClick = onOpenLocationSettings,

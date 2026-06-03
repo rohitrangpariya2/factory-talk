@@ -96,4 +96,5 @@ dependencies {
     implementation(libs.gson)
 
     debugImplementation(libs.compose.tooling)
+    testImplementation(libs.junit)
 }

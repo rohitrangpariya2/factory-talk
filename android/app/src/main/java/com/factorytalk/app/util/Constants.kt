@@ -40,6 +40,8 @@ object Constants {
     const val ACTION_JOIN_CHANNEL = "com.factorytalk.app.action.JOIN_CHANNEL"
     const val ACTION_LEAVE_CHANNEL = "com.factorytalk.app.action.LEAVE_CHANNEL"
     const val ACTION_INCOMING_BROADCAST = "com.factorytalk.app.action.INCOMING_BROADCAST"
+    const val ACTION_AUTO_TRACKING_START = "com.factorytalk.app.action.AUTO_TRACKING_START"
+    const val ACTION_AUTO_TRACKING_STOP = "com.factorytalk.app.action.AUTO_TRACKING_STOP"
     
     // Intent Extras
     const val EXTRA_CHANNEL_ID = "extra_channel_id"
@@ -59,6 +61,10 @@ object Constants {
     const val PREF_REMINDER_ON_TIME = "reminder_on_time"
     const val PREF_REMINDER_OFF_TIME = "reminder_off_time"
     const val PREF_LOCATION_SHARING_ENABLED = "location_sharing_enabled"
+    const val PREF_AUTO_TRACKING_ENABLED = "auto_tracking_enabled"
+    const val PREF_AUTO_TRACKING_STATUS = "auto_tracking_status"
+    const val PREF_AUTO_TRACKING_LAST_SCHEDULED_START_AT = "auto_tracking_last_scheduled_start_at"
+    const val PREF_AUTO_TRACKING_LAST_SCHEDULED_STOP_AT = "auto_tracking_last_scheduled_stop_at"
     const val PREF_LAST_LOCATION_SENT_AT = "last_location_sent_at"
     const val PREF_LAST_LOCATION_LATITUDE = "last_location_latitude"
     const val PREF_LAST_LOCATION_LONGITUDE = "last_location_longitude"
@@ -69,6 +75,10 @@ object Constants {
     const val LOCATION_STALE_RESTART_MS = 45_000L
     const val LOCATION_FIX_STALE_MS = 120_000L
     const val LOCATION_HEARTBEAT_INTERVAL_MS = 30_000L
+    const val AUTO_TRACKING_START_HOUR = 9
+    const val AUTO_TRACKING_START_MINUTE = 0
+    const val AUTO_TRACKING_STOP_HOUR = 20
+    const val AUTO_TRACKING_STOP_MINUTE = 0
     
     // PTT Config
     const val MAX_TALK_DURATION_SECONDS = 60

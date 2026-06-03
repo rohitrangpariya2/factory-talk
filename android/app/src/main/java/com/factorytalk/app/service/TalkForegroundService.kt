@@ -112,6 +112,23 @@ class TalkForegroundService : Service() {
                 // Just starting normally
                 updateNotification("Connecting...")
             }
+            Constants.ACTION_AUTO_TRACKING_START -> {
+                AutoTrackingScheduler.schedule(this)
+                updateLocationStatus(autoTrackingStatusText())
+                updateNotification("Auto tracking active")
+            }
+            Constants.ACTION_AUTO_TRACKING_STOP -> {
+                updateLocationStatus("Auto tracking stopped")
+                if (!isManualLocationSharingEnabled()) {
+                    stopLocationUpdates()
+                }
+                updateNotification("Auto tracking stopped")
+                AutoTrackingScheduler.schedule(this)
+                if (!isManualLocationSharingEnabled() && !isWalkieEnabled()) {
+                    explicitStopRequested = true
+                    stopForegroundService()
+                }
+            }
             Constants.ACTION_STOP_SERVICE -> {
                 explicitStopRequested = true
                 stopForegroundService()
@@ -227,6 +244,9 @@ class TalkForegroundService : Service() {
                     signalingClient.disconnect()
                     initializeSignaling()
                     updateNotification("Reconnecting...")
+                    if (shouldTrackLocationNow()) updateLocationStatus("Waiting for Internet")
+                } else if (!connectionWatchdog.networkState.value && shouldTrackLocationNow()) {
+                    updateLocationStatus("Waiting for Internet")
                 } else if (signalingClient.connectionState.value == com.factorytalk.app.data.model.ConnectionState.CONNECTED) {
                     currentChannelId?.let { signalingClient.joinChannel(it) }
                 }
@@ -254,20 +274,15 @@ class TalkForegroundService : Service() {
         }
     }
 
-    private fun isWithinTrackingHours(): Boolean {
-        val calendar = java.util.Calendar.getInstance()
-        val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
-        return hour in 9..19
-    }
+    private fun isWithinTrackingHours(): Boolean = AutoTrackingScheduler.isWithinTrackingWindow()
 
     private fun observeLocationSharing() {
         if (locationJob?.isActive == true) return
         locationJob = serviceScope.launch {
             while (true) {
-                val enabled = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                    .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
+                val enabled = shouldTrackLocationNow()
                 val withinHours = isWithinTrackingHours()
-                if (enabled && hasLocationPermission() && withinHours) {
+                if (enabled && hasLocationPermission()) {
                     if (locationListener == null) {
                         startForegroundServiceWithNotification()
                     }
@@ -278,11 +293,13 @@ class TalkForegroundService : Service() {
                     sendLastKnownLocation(allowStaleHeartbeat = true)
                 } else {
                     if (enabled) {
-                        if (!withinHours) {
-                            updateLocationStatus("Tracking inactive (Active hours: 9AM - 8PM)")
-                        } else {
+                        if (!hasLocationPermission()) {
                             updateLocationStatus("Location permission missing")
+                        } else {
+                            updateLocationStatus(autoTrackingStatusText())
                         }
+                    } else if (!withinHours && isAutoTrackingEnabled()) {
+                        updateLocationStatus("Scheduled: 9:00 AM - 8:00 PM")
                     }
                     stopLocationUpdates()
                 }
@@ -353,7 +370,7 @@ class TalkForegroundService : Service() {
     }
 
     private fun sendLastKnownLocation(allowStaleHeartbeat: Boolean = false) {
-        if (!isWithinTrackingHours()) return
+        if (!shouldTrackLocationNow()) return
         val location = lastKnownLocation ?: return
         val now = System.currentTimeMillis()
         val batteryLevel = getBatteryLevel()
@@ -465,7 +482,38 @@ class TalkForegroundService : Service() {
         getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(Constants.PREF_LOCATION_STATUS, status)
+            .putString(Constants.PREF_AUTO_TRACKING_STATUS, autoTrackingStatusText(status))
             .apply()
+    }
+
+    private fun shouldTrackLocationNow(): Boolean {
+        return isManualLocationSharingEnabled() || (isAutoTrackingEnabled() && isWithinTrackingHours())
+    }
+
+    private fun isManualLocationSharingEnabled(): Boolean {
+        return getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
+    }
+
+    private fun isAutoTrackingEnabled(): Boolean {
+        return getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(Constants.PREF_AUTO_TRACKING_ENABLED, false)
+    }
+
+    private fun isWalkieEnabled(): Boolean {
+        return getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(Constants.PREF_WALKIE_ENABLED, true)
+    }
+
+    private fun autoTrackingStatusText(locationStatus: String = ""): String {
+        if (!isAutoTrackingEnabled()) return "Auto Tracking OFF"
+        if (!isWithinTrackingHours()) return "Not Tracking"
+        if (!connectionWatchdog.networkState.value ||
+            signalingClient.connectionState.value != com.factorytalk.app.data.model.ConnectionState.CONNECTED
+        ) {
+            return "Waiting for Internet"
+        }
+        return locationStatus.takeIf { it.isNotBlank() } ?: "Currently Tracking"
     }
 
     private fun hasLocationPermission(): Boolean {
@@ -505,9 +553,7 @@ class TalkForegroundService : Service() {
                 updateNotification("Connected - Listening")
             }
             is com.factorytalk.app.data.remote.SignalingEvent.LocationUpdateRequested -> {
-                val enabled = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                    .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
-                if (enabled && hasLocationPermission()) {
+                if (shouldTrackLocationNow() && hasLocationPermission()) {
                     startLocationUpdates()
                     sendLastKnownLocation(allowStaleHeartbeat = true)
                 }
@@ -613,9 +659,7 @@ class TalkForegroundService : Service() {
         var type = 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            val locationEnabled = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(Constants.PREF_LOCATION_SHARING_ENABLED, false)
-            if (locationEnabled && hasLocationPermission()) {
+            if (shouldTrackLocationNow() && hasLocationPermission()) {
                 type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             }
         }
