@@ -34,6 +34,8 @@ describe('stop integration with delivery history', () => {
       pointCount: 0,
       rejectedPointCount: 0,
       dailyDistanceMeters: 0,
+      rawGpsDistanceMeters: 0,
+      distanceSource: 'raw_gps',
       movingTimeMs: 0,
       stoppedTimeMs: 0,
       routeReplay: [],
@@ -42,6 +44,20 @@ describe('stop integration with delivery history', () => {
         totalStops: 2,
         totalStoppedTimeMs: 900_000,
         longestStopMs: 600_000
+      },
+      distanceDiagnostics: {
+        totalReceivedPoints: 0,
+        acceptedPoints: 0,
+        rejectedPointCount: 0,
+        rejectedByReason: {
+          invalidCoordinate: 0,
+          poorAccuracy: 0,
+          badTimestamp: 0,
+          impossibleJump: 0
+        },
+        rawGpsDistanceMeters: 0,
+        pointTimeGapsMs: [],
+        accuracyMeters: {}
       }
     });
 
@@ -60,7 +76,7 @@ describe('stop integration with delivery history', () => {
   test('report API reads stop events and passes them into delivery report', () => {
     expect(indexSource).toContain('getStopEventsForRange');
     expect(indexSource).toContain('const factoryZone = await getGeofenceConfig()');
-    expect(indexSource).toContain('buildDeliveryHistoryReport(history, range.date, factoryZone, stops)');
+    expect(indexSource).toContain('buildDeliveryReportWithRoadDistance(history, range.date, factoryZone, stops)');
   });
 
   test('stop detection runs only after accepted GPS stream succeeds', () => {

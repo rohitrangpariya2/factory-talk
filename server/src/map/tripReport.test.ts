@@ -18,6 +18,14 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain("reportBox('Active trips'");
   });
 
+  test('uses road matched distance for Today KM when available and keeps raw fallback', () => {
+    expect(indexSource).toContain('const tripDistanceCache = new Map()');
+    expect(indexSource).toContain('function rememberRoadDistance(routeCacheKey, roadLatLngs)');
+    expect(indexSource).toContain('function roadMatchedDistanceForPoints(points)');
+    expect(indexSource).toContain('distanceMeters: matchedDistance ?? distance');
+    expect(indexSource).toContain("distanceSource: matchedDistance === null ? 'raw_gps' : 'road_matched'");
+  });
+
   test('renders simple trip cards that can open each trip on the map', () => {
     expect(indexSource).toContain('function openTripOnMap(index)');
     expect(indexSource).toContain('function drawTripOnMap(trip, index)');

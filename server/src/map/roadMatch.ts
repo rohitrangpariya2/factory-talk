@@ -29,10 +29,11 @@ export type RoadMatchCoordinate = {
 export type RoadMatchResult = {
   status: 'matched' | 'fallback';
   coordinates: RoadMatchCoordinate[];
+  distanceMeters: number;
   reason?: string;
 };
 
-function distanceMeters(a: RoadMatchCoordinate, b: RoadMatchCoordinate): number {
+export function distanceMeters(a: RoadMatchCoordinate, b: RoadMatchCoordinate): number {
   const earthRadiusMeters = 6371000;
   const dLat = (b.latitude - a.latitude) * Math.PI / 180;
   const dLng = (b.longitude - a.longitude) * Math.PI / 180;
@@ -42,6 +43,14 @@ function distanceMeters(a: RoadMatchCoordinate, b: RoadMatchCoordinate): number 
     Math.sin(dLat / 2) ** 2 +
     Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
   return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+export function coordinateDistanceMeters(points: RoadMatchCoordinate[]): number {
+  let distance = 0;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    distance += distanceMeters(points[index], points[index + 1]);
+  }
+  return distance;
 }
 
 function normalizeTimestamp(value: number | string | undefined): number | undefined {
@@ -143,13 +152,15 @@ export function parseOsrmMatchResponse(data: unknown): RoadMatchCoordinate[] {
 }
 
 export function buildRoadMatchFallback(points: PreparedRoadMatchPoint[], reason: string): RoadMatchResult {
+  const coordinates = points.map((point) => ({
+    latitude: point.latitude,
+    longitude: point.longitude
+  }));
   return {
     status: 'fallback',
     reason,
-    coordinates: points.map((point) => ({
-      latitude: point.latitude,
-      longitude: point.longitude
-    }))
+    distanceMeters: coordinateDistanceMeters(coordinates),
+    coordinates
   };
 }
 

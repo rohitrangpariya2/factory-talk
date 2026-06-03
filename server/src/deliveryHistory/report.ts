@@ -5,6 +5,14 @@ import { UserRole } from '../types';
 
 type FactoryBounds = Pick<FactoryZone, 'latitude' | 'longitude' | 'radiusMeters'>;
 
+type RejectionReason = 'invalidCoordinate' | 'poorAccuracy' | 'badTimestamp' | 'impossibleJump';
+
+export type DeliveryDistanceOverride = {
+  source: 'road_matched' | 'raw_gps';
+  distanceMeters?: number;
+  reason?: string;
+};
+
 export type DeliveryHistoryPoint = {
   userId: string;
   name: string;
@@ -27,6 +35,9 @@ export type DeliveryHistoryReport = {
   pointCount: number;
   rejectedPointCount: number;
   dailyDistanceMeters: number;
+  rawGpsDistanceMeters: number;
+  matchedRoadDistanceMeters?: number;
+  distanceSource: 'road_matched' | 'raw_gps';
   movingTimeMs: number;
   stoppedTimeMs: number;
   firstDepartureAt?: number;
@@ -37,11 +48,27 @@ export type DeliveryHistoryReport = {
     latitude: number;
     longitude: number;
     locationUpdatedAt: number;
+    accuracy?: number;
     speedKmh?: number;
     bearing?: number;
   }>;
   stops: StopEvent[];
   stopSummary: StopSummary;
+  distanceDiagnostics: {
+    totalReceivedPoints: number;
+    acceptedPoints: number;
+    rejectedPointCount: number;
+    rejectedByReason: Record<RejectionReason, number>;
+    rawGpsDistanceMeters: number;
+    matchedRoadDistanceMeters?: number;
+    pointTimeGapsMs: number[];
+    accuracyMeters: {
+      min?: number;
+      max?: number;
+      avg?: number;
+    };
+    fallbackReason?: string;
+  };
 };
 
 export type DeliveryHistoryDateRange = {
@@ -91,17 +118,15 @@ export function buildDeliveryHistoryReport(
   rawPoints: DeliveryHistoryPoint[],
   date: string,
   factoryZone: FactoryBounds = FACTORY_ZONE,
-  stops: StopEvent[] = []
+  stops: StopEvent[] = [],
+  distanceOverride?: DeliveryDistanceOverride
 ): DeliveryHistoryReport {
-  const sorted = rawPoints
-    .filter((point) => Number.isFinite(Number(point.latitude)) && Number.isFinite(Number(point.longitude)))
-    .slice()
-    .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
-  const stablePoints = filterStablePoints(sorted);
-  const rejectedPointCount = sorted.length - stablePoints.length;
+  const analysis = analyzeStablePoints(rawPoints);
+  const stablePoints = analysis.stablePoints;
+  const rejectedPointCount = analysis.rejectedPointCount;
   const first = stablePoints[0];
   const last = stablePoints[stablePoints.length - 1];
-  let dailyDistanceMeters = 0;
+  let rawGpsDistanceMeters = 0;
   let movingTimeMs = 0;
   let stoppedTimeMs = 0;
 
@@ -111,13 +136,20 @@ export function buildDeliveryHistoryReport(
     const gapMs = Math.max(0, Number(next.locationUpdatedAt || 0) - Number(current.locationUpdatedAt || 0));
     const distance = distanceMeters(current.latitude, current.longitude, next.latitude, next.longitude);
     if (distance >= MOVING_SEGMENT_DISTANCE_METERS) {
-      dailyDistanceMeters += distance;
+      rawGpsDistanceMeters += distance;
       movingTimeMs += gapMs;
     } else {
       stoppedTimeMs += gapMs;
     }
   }
 
+  const matchedRoadDistanceMeters = distanceOverride?.source === 'road_matched' &&
+    Number.isFinite(Number(distanceOverride.distanceMeters)) &&
+    Number(distanceOverride.distanceMeters) >= 0
+    ? Number(distanceOverride.distanceMeters)
+    : undefined;
+  const dailyDistanceMeters = matchedRoadDistanceMeters ?? rawGpsDistanceMeters;
+  const distanceSource = matchedRoadDistanceMeters === undefined ? 'raw_gps' : 'road_matched';
   const departureAt = firstDepartureAt(stablePoints, factoryZone);
   return {
     date,
@@ -126,6 +158,9 @@ export function buildDeliveryHistoryReport(
     pointCount: stablePoints.length,
     rejectedPointCount,
     dailyDistanceMeters,
+    rawGpsDistanceMeters,
+    matchedRoadDistanceMeters,
+    distanceSource,
     movingTimeMs,
     stoppedTimeMs,
     firstDepartureAt: departureAt,
@@ -136,11 +171,23 @@ export function buildDeliveryHistoryReport(
       latitude: point.latitude,
       longitude: point.longitude,
       locationUpdatedAt: point.locationUpdatedAt,
+      accuracy: point.accuracy,
       speedKmh: point.speedKmh,
       bearing: point.bearing
     })),
     stops,
-    stopSummary: buildStopSummary(stops)
+    stopSummary: buildStopSummary(stops),
+    distanceDiagnostics: {
+      totalReceivedPoints: rawPoints.length,
+      acceptedPoints: stablePoints.length,
+      rejectedPointCount,
+      rejectedByReason: analysis.rejectedByReason,
+      rawGpsDistanceMeters,
+      matchedRoadDistanceMeters,
+      pointTimeGapsMs: analysis.pointTimeGapsMs,
+      accuracyMeters: analysis.accuracyMeters,
+      fallbackReason: matchedRoadDistanceMeters === undefined ? distanceOverride?.reason : undefined
+    }
   };
 }
 
@@ -182,11 +229,39 @@ export function deliveryHistoryReportToCsv(report: DeliveryHistoryReport): strin
 }
 
 function filterStablePoints(points: DeliveryHistoryPoint[]): DeliveryHistoryPoint[] {
-  if (points.length < 2) return points.filter(hasTrustedAccuracy);
+  return analyzeStablePoints(points).stablePoints;
+}
 
+function analyzeStablePoints(points: DeliveryHistoryPoint[]): {
+  stablePoints: DeliveryHistoryPoint[];
+  rejectedPointCount: number;
+  rejectedByReason: Record<RejectionReason, number>;
+  pointTimeGapsMs: number[];
+  accuracyMeters: { min?: number; max?: number; avg?: number };
+} {
+  const rejectedByReason: Record<RejectionReason, number> = {
+    invalidCoordinate: 0,
+    poorAccuracy: 0,
+    badTimestamp: 0,
+    impossibleJump: 0
+  };
+  const sorted = points
+    .slice()
+    .sort((a, b) => Number(a.locationUpdatedAt || 0) - Number(b.locationUpdatedAt || 0));
+  const accuracies = sorted
+    .map((point) => Number(point.accuracy || 0))
+    .filter((accuracy) => Number.isFinite(accuracy) && accuracy > 0);
   const stable: DeliveryHistoryPoint[] = [];
-  points.forEach((point) => {
-    if (!hasTrustedAccuracy(point)) return;
+  const pointTimeGapsMs: number[] = [];
+  sorted.forEach((point) => {
+    if (!Number.isFinite(Number(point.latitude)) || !Number.isFinite(Number(point.longitude))) {
+      rejectedByReason.invalidCoordinate += 1;
+      return;
+    }
+    if (!hasTrustedAccuracy(point)) {
+      rejectedByReason.poorAccuracy += 1;
+      return;
+    }
     const previous = stable[stable.length - 1];
     if (!previous) {
       stable.push(point);
@@ -194,15 +269,38 @@ function filterStablePoints(points: DeliveryHistoryPoint[]): DeliveryHistoryPoin
     }
 
     const deltaMs = Number(point.locationUpdatedAt || 0) - Number(previous.locationUpdatedAt || 0);
-    if (deltaMs <= 0) return;
+    if (deltaMs <= 0) {
+      rejectedByReason.badTimestamp += 1;
+      return;
+    }
+    pointTimeGapsMs.push(deltaMs);
     const distance = distanceMeters(previous.latitude, previous.longitude, point.latitude, point.longitude);
     const speedKmh = (distance / 1000) / (deltaMs / 3600000);
     const hardJump = deltaMs <= MIN_GPS_JUMP_INTERVAL_MS && distance >= MAX_GPS_JUMP_METERS;
-    if (hardJump || speedKmh > MAX_GPS_JUMP_SPEED_KMH) return;
+    if (hardJump || speedKmh > MAX_GPS_JUMP_SPEED_KMH) {
+      rejectedByReason.impossibleJump += 1;
+      return;
+    }
     stable.push(point);
   });
 
-  return stable;
+  return {
+    stablePoints: stable,
+    rejectedPointCount: sorted.length - stable.length,
+    rejectedByReason,
+    pointTimeGapsMs,
+    accuracyMeters: accuracyStats(accuracies)
+  };
+}
+
+function accuracyStats(accuracies: number[]): { min?: number; max?: number; avg?: number } {
+  if (!accuracies.length) return {};
+  const total = accuracies.reduce((sum, accuracy) => sum + accuracy, 0);
+  return {
+    min: Math.min(...accuracies),
+    max: Math.max(...accuracies),
+    avg: total / accuracies.length
+  };
 }
 
 function hasTrustedAccuracy(point: DeliveryHistoryPoint): boolean {

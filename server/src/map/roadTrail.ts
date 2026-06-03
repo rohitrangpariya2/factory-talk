@@ -81,6 +81,8 @@ export function buildRoadTrailScript(): string {
         .map((coordinate) => [Number(coordinate.latitude), Number(coordinate.longitude)])
         .filter((coordinate) => Number.isFinite(coordinate[0]) && Number.isFinite(coordinate[1]));
       if (roadLatLngs.length < 2) throw new Error('Road match empty');
+      roadLatLngs.roadMatchStatus = data.status;
+      roadLatLngs.roadDistanceMeters = Number(data.distanceMeters);
       return roadLatLngs;
     }
   `;

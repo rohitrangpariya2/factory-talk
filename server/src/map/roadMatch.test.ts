@@ -81,10 +81,13 @@ describe('road match helpers', () => {
     expect(fallback).toEqual({
       status: 'fallback',
       reason: 'OSRM returned NoMatch',
+      distanceMeters: expect.any(Number),
       coordinates: [
         { latitude: 21.259843, longitude: 72.938618 },
         { latitude: 21.260123, longitude: 72.939988 }
       ]
     });
+    expect(fallback.distanceMeters).toBeGreaterThan(100);
+    expect(fallback.distanceMeters).toBeLessThan(200);
   });
 });

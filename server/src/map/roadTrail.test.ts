@@ -17,6 +17,7 @@ describe('road trail script', () => {
     expect(script).toContain("method: 'POST'");
     expect(script).toContain("data.status === 'matched'");
     expect(script).toContain("data.status === 'fallback'");
+    expect(script).toContain('roadLatLngs.roadDistanceMeters = Number(data.distanceMeters)');
     expect(script).toContain("throw new Error('Road match failed (' + response.status + ')')");
     expect(script).not.toContain('function isRoadTrailPrefix');
     expect(script).not.toContain('function roadTrailPointKey');

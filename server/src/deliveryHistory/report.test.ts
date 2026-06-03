@@ -61,6 +61,44 @@ describe('delivery history report', () => {
     expect(report.pointCount).toBe(3);
     expect(report.rejectedPointCount).toBe(2);
     expect(report.dailyDistanceMeters).toBeLessThan(350);
+    expect(report.distanceDiagnostics.rejectedByReason.poorAccuracy).toBe(1);
+    expect(report.distanceDiagnostics.rejectedByReason.impossibleJump).toBe(1);
+  });
+
+  test('uses matched road distance when OSRM match succeeds for sparse GPS points', () => {
+    const points = [
+      point(0, FACTORY_ZONE.latitude, FACTORY_ZONE.longitude),
+      point(10 * 60 * 1000, FACTORY_ZONE.latitude + 0.01, FACTORY_ZONE.longitude + 0.01)
+    ];
+
+    const rawReport = buildDeliveryHistoryReport(points, '2026-06-02');
+    const report = buildDeliveryHistoryReport(points, '2026-06-02', FACTORY_ZONE, [], {
+      source: 'road_matched',
+      distanceMeters: 4_750
+    });
+
+    expect(rawReport.dailyDistanceMeters).toBeLessThan(2_000);
+    expect(report.dailyDistanceMeters).toBe(4_750);
+    expect(report.rawGpsDistanceMeters).toBe(rawReport.dailyDistanceMeters);
+    expect(report.matchedRoadDistanceMeters).toBe(4_750);
+    expect(report.distanceSource).toBe('road_matched');
+  });
+
+  test('falls back to filtered raw GPS distance when road matching is unavailable', () => {
+    const points = [
+      point(0, FACTORY_ZONE.latitude, FACTORY_ZONE.longitude),
+      point(5 * 60 * 1000, FACTORY_ZONE.latitude + 0.002, FACTORY_ZONE.longitude)
+    ];
+
+    const report = buildDeliveryHistoryReport(points, '2026-06-02', FACTORY_ZONE, [], {
+      source: 'raw_gps',
+      reason: 'OSRM rate limited'
+    });
+
+    expect(report.dailyDistanceMeters).toBe(report.rawGpsDistanceMeters);
+    expect(report.matchedRoadDistanceMeters).toBeUndefined();
+    expect(report.distanceSource).toBe('raw_gps');
+    expect(report.distanceDiagnostics.totalReceivedPoints).toBe(2);
   });
 
   test('exports daily report as csv', () => {

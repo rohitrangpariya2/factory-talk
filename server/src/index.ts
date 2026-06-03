@@ -13,6 +13,7 @@ import { buildFactoryZoneScript } from './map/factoryZone';
 import {
   buildOsrmMatchUrl,
   buildRoadMatchFallback,
+  coordinateDistanceMeters,
   parseOsrmMatchResponse,
   prepareRoadMatchPoints,
   roadMatchCacheKey,
@@ -203,7 +204,7 @@ async function buildRoadMatchResponse(points: RoadMatchInputPoint[]): Promise<Ro
     } else {
       const matched = parseOsrmMatchResponse(await matchResponse.json());
       result = matched.length >= 2
-        ? { status: 'matched', coordinates: matched }
+        ? { status: 'matched', coordinates: matched, distanceMeters: coordinateDistanceMeters(matched) }
         : buildRoadMatchFallback(prepared, 'OSRM match returned no usable geometry');
     }
   } catch (error) {
@@ -216,6 +217,37 @@ async function buildRoadMatchResponse(points: RoadMatchInputPoint[]): Promise<Ro
   }
   roadMatchCache.set(key, { expiresAt: Date.now() + ROAD_MATCH_CACHE_TTL_MS, result });
   return result;
+}
+
+async function buildDeliveryReportWithRoadDistance(
+  history: Parameters<typeof buildDeliveryHistoryReport>[0],
+  date: string,
+  factoryZone: Parameters<typeof buildDeliveryHistoryReport>[2],
+  stops: Parameters<typeof buildDeliveryHistoryReport>[3]
+): Promise<{ report: ReturnType<typeof buildDeliveryHistoryReport>; roadMatch: RoadMatchResult | null }> {
+  const rawReport = buildDeliveryHistoryReport(history, date, factoryZone, stops);
+  if (rawReport.routeReplay.length < 2) {
+    return { report: rawReport, roadMatch: null };
+  }
+
+  const roadMatch = await buildRoadMatchResponse(rawReport.routeReplay);
+  if (roadMatch.status === 'matched' && roadMatch.coordinates.length >= 2) {
+    return {
+      roadMatch,
+      report: buildDeliveryHistoryReport(history, date, factoryZone, stops, {
+        source: 'road_matched',
+        distanceMeters: roadMatch.distanceMeters
+      })
+    };
+  }
+
+  return {
+    roadMatch,
+    report: buildDeliveryHistoryReport(history, date, factoryZone, stops, {
+      source: 'raw_gps',
+      reason: roadMatch.reason || 'OSRM match unavailable'
+    })
+  };
 }
 
 async function roadMatchHandler(req: express.Request, res: express.Response): Promise<void> {
@@ -265,7 +297,7 @@ app.get('/delivery-history/report', async (req, res) => {
     const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
     const stops = await getStopEventsForRange(userId, range.startMs, range.endMs);
     const factoryZone = await getGeofenceConfig();
-    const report = buildDeliveryHistoryReport(history, range.date, factoryZone, stops);
+    const { report } = await buildDeliveryReportWithRoadDistance(history, range.date, factoryZone, stops);
     res.status(200).json({
       report,
       warning: 'Old reports may be unavailable if location history was cleaned.'
@@ -297,7 +329,7 @@ app.get('/delivery-history/export', async (req, res) => {
     const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
     const stops = await getStopEventsForRange(userId, range.startMs, range.endMs);
     const factoryZone = await getGeofenceConfig();
-    const report = buildDeliveryHistoryReport(history, range.date, factoryZone, stops);
+    const { report } = await buildDeliveryReportWithRoadDistance(history, range.date, factoryZone, stops);
     const csv = deliveryHistoryReportToCsv(report);
     const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -305,6 +337,56 @@ app.get('/delivery-history/export', async (req, res) => {
     res.status(200).send(csv);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to export delivery history report';
+    const status = message.includes('date') ? 400 : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get('/delivery-history/distance-debug', roadProxyRateLimiter, async (req, res) => {
+  try {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+    const date = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+    if (!date) {
+      res.status(400).json({ error: 'date is required' });
+      return;
+    }
+
+    const timezoneOffsetMinutes = req.query.timezoneOffsetMinutes !== undefined
+      ? Number(req.query.timezoneOffsetMinutes)
+      : undefined;
+    const range = parseDeliveryHistoryDateRange(date, timezoneOffsetMinutes);
+    const history = await getSavedLocationHistoryForRange(userId, range.startMs, range.endMs);
+    const stops = await getStopEventsForRange(userId, range.startMs, range.endMs);
+    const factoryZone = await getGeofenceConfig();
+    const { report, roadMatch } = await buildDeliveryReportWithRoadDistance(history, range.date, factoryZone, stops);
+    res.status(200).json({
+      userId,
+      date: range.date,
+      totalReceivedPoints: report.distanceDiagnostics.totalReceivedPoints,
+      acceptedPoints: report.distanceDiagnostics.acceptedPoints,
+      rejectedPointCount: report.distanceDiagnostics.rejectedPointCount,
+      rejectedByReason: report.distanceDiagnostics.rejectedByReason,
+      rawGpsDistanceMeters: report.rawGpsDistanceMeters,
+      matchedRoadDistanceMeters: report.matchedRoadDistanceMeters,
+      distanceSource: report.distanceSource,
+      dailyDistanceMeters: report.dailyDistanceMeters,
+      pointTimeGapsMs: report.distanceDiagnostics.pointTimeGapsMs,
+      accuracyMeters: report.distanceDiagnostics.accuracyMeters,
+      roadMatch: roadMatch
+        ? {
+            status: roadMatch.status,
+            reason: roadMatch.reason,
+            distanceMeters: roadMatch.distanceMeters,
+            coordinateCount: roadMatch.coordinates.length
+          }
+        : null
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to build distance diagnostics';
     const status = message.includes('date') ? 400 : 500;
     res.status(status).json({ error: message });
   }
@@ -1068,6 +1150,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const historyLineCasings = new Map();
     const tripLayers = L.layerGroup().addTo(map);
     const tripRouteCache = new Map();
+    const tripDistanceCache = new Map();
     const liveRouteInflight = new Set();
     const activeTripSuggestedCache = new Map();
     
@@ -1615,6 +1698,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           const routeCacheKey = roadRouteCacheKey(roadPoints, key + ':live:' + segmentIndex);
           const cachedRoute = tripRouteCache.get(routeCacheKey);
           if (cachedRoute && cachedRoute.length > 1) {
+            rememberRoadDistance(routeCacheKey, cachedRoute);
             rawSegmentLatLngs[segmentIndex] = cachedRoute;
             historyLines.get(key).setLatLngs(rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs);
             return;
@@ -1625,6 +1709,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
             .then((roadLatLngs) => {
               if (roadLatLngs.length > 1) {
                 tripRouteCache.set(routeCacheKey, roadLatLngs);
+                rememberRoadDistance(routeCacheKey, roadLatLngs);
                 rawSegmentLatLngs[segmentIndex] = roadLatLngs;
                 const casing = historyLineCasings.get(key);
                 if (casing) casing.setLatLngs(rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs);
@@ -2085,11 +2170,14 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       const startTime = Number(points[0].locationUpdatedAt || 0);
       const endTime = Number(last.locationUpdatedAt || 0);
       const totalTimeMs = Math.max(0, endTime - startTime);
+      const matchedDistance = roadMatchedDistanceForPoints(points);
       return {
         startTime,
         endTime,
         totalTimeMs,
-        distanceMeters: distance,
+        rawDistanceMeters: distance,
+        distanceMeters: matchedDistance ?? distance,
+        distanceSource: matchedDistance === null ? 'raw_gps' : 'road_matched',
         movingTimeMs: movingTime,
         stops
       };
@@ -2112,6 +2200,31 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return points
         .map((point) => Number(point.longitude).toFixed(5) + ',' + Number(point.latitude).toFixed(5))
         .join(';');
+    }
+
+    function rememberRoadDistance(routeCacheKey, roadLatLngs) {
+      const distance = Number(roadLatLngs && roadLatLngs.roadDistanceMeters);
+      if (Number.isFinite(distance) && distance >= 0) {
+        tripDistanceCache.set(routeCacheKey, distance);
+      }
+    }
+
+    function roadMatchedDistanceForPoints(points) {
+      const segments = splitStableRouteSegments(points);
+      if (!segments.length) return null;
+      let total = 0;
+      let matchedSegments = 0;
+      segments.forEach((segmentPoints, segmentIndex) => {
+        const roadPoints = sampleRoadTrailPoints(segmentPoints);
+        if (roadPoints.length < 2) return;
+        const routeCacheKey = roadRouteCacheKey(roadPoints, 'distance:seg:' + segmentIndex);
+        const cachedDistance = tripDistanceCache.get(routeCacheKey);
+        if (Number.isFinite(cachedDistance)) {
+          total += cachedDistance;
+          matchedSegments += 1;
+        }
+      });
+      return matchedSegments > 0 ? total : null;
     }
 
     function addTripPoint(latLng, color, title, body) {
@@ -2278,12 +2391,14 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           const cachedRoute = tripRouteCache.get(routeCacheKey);
 
           if (cachedRoute && cachedRoute.length > 1) {
+            rememberRoadDistance(routeCacheKey, cachedRoute);
             return Promise.resolve(cachedRoute);
           } else if (roadPoints.length > 1) {
             return fetchRoadLatLngs(roadPoints, { force: true })
               .then((roadLatLngs) => {
                 if (roadLatLngs.length > 1) {
                   tripRouteCache.set(routeCacheKey, roadLatLngs);
+                  rememberRoadDistance(routeCacheKey, roadLatLngs);
                   return roadLatLngs;
                 }
                 return segmentLatLngs;

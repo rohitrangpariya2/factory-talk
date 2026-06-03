@@ -9,6 +9,14 @@ describe('delivery history dashboard route', () => {
     expect(indexSource).toContain("app.get('/delivery-history'");
     expect(indexSource).toContain("app.get('/delivery-history/report'");
     expect(indexSource).toContain("app.get('/delivery-history/export'");
+    expect(indexSource).toContain("app.get('/delivery-history/distance-debug'");
+  });
+
+  test('report and export prefer road matched distance when available', () => {
+    expect(indexSource).toContain('async function buildDeliveryReportWithRoadDistance');
+    expect(indexSource).toContain("source: 'road_matched'");
+    expect(indexSource).toContain("source: 'raw_gps'");
+    expect(indexSource).toContain('await buildDeliveryReportWithRoadDistance(history, range.date, factoryZone, stops)');
   });
 
   test('renders user/date filters replay map export controls and cleanup warning', () => {
