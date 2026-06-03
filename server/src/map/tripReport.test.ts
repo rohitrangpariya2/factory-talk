@@ -125,4 +125,23 @@ describe('factory trip report map script', () => {
     expect(indexSource).toContain('weight: 5');
     expect(indexSource).not.toContain('applyRoadTrail(key, trailPoints');
   });
+
+  test('live blue route displays matched geometry with raw GPS fallback and debug metadata', () => {
+    expect(indexSource).toContain('const liveRouteDebug = new Map()');
+    expect(indexSource).toContain("routeSource: 'raw_gps'");
+    expect(indexSource).toContain("routeSource: 'road_matched'");
+    expect(indexSource).toContain('matchedGeometryPoints: roadLatLngs.length');
+    expect(indexSource).toContain('rawGpsPoints: segmentPoints.length');
+    expect(indexSource).toContain('lastMatchStatus: roadLatLngs.roadMatchStatus');
+    expect(indexSource).toContain('window.__factoryTalkLiveRouteDebug');
+    expect(indexSource).toContain('line.setLatLngs(nextLatLngs)');
+    expect(indexSource).toContain('casing.setLatLngs(nextLatLngs)');
+  });
+
+  test('live route cache key changes when newer GPS points arrive', () => {
+    expect(indexSource).toContain('function liveRouteCacheKey(points, fallbackKey)');
+    expect(indexSource).toContain('Number(last.locationUpdatedAt || 0)');
+    expect(indexSource).toContain('pointCount');
+    expect(indexSource).toContain('const routeCacheKey = liveRouteCacheKey(roadPoints, key + ');
+  });
 });

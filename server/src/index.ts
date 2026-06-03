@@ -1151,6 +1151,8 @@ app.get(['/map', '/map/:userId'], (req, res) => {
     const tripLayers = L.layerGroup().addTo(map);
     const tripRouteCache = new Map();
     const tripDistanceCache = new Map();
+    const liveRouteDebug = new Map();
+    window.__factoryTalkLiveRouteDebug = liveRouteDebug;
     const liveRouteInflight = new Set();
     const activeTripSuggestedCache = new Map();
     
@@ -1640,6 +1642,27 @@ app.get(['/map', '/map/:userId'], (req, res) => {
       return trail.slice(-LIVE_TRAIL_MAX_POINTS);
     }
 
+    function liveRouteCacheKey(points, fallbackKey) {
+      if (!points.length) return fallbackKey;
+      const last = points[points.length - 1];
+      const pointCount = points.length;
+      return [
+        roadRouteCacheKey(points, fallbackKey),
+        pointCount,
+        Number(last.locationUpdatedAt || 0)
+      ].join(':');
+    }
+
+    function updateLiveRouteDebug(key, details) {
+      liveRouteDebug.set(key, {
+        routeSource: details.routeSource,
+        matchedGeometryPoints: details.matchedGeometryPoints || 0,
+        rawGpsPoints: details.rawGpsPoints || 0,
+        lastMatchStatus: details.lastMatchStatus || details.routeSource,
+        updatedAt: Date.now()
+      });
+    }
+
     function updateHistory(points) {
       const grouped = new Map();
       points.forEach((point) => {
@@ -1659,6 +1682,12 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           segmentPoints.map((point) => [point.latitude, point.longitude])
         );
         const latLngs = rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs;
+        updateLiveRouteDebug(key, {
+          routeSource: 'raw_gps',
+          matchedGeometryPoints: 0,
+          rawGpsPoints: trailPoints.length,
+          lastMatchStatus: 'raw_gps'
+        });
         const color = LIVE_TRAIL_COLOR;
         if (!historyLineCasings.has(key)) {
           historyLineCasings.set(key, L.polyline(latLngs, {
@@ -1688,12 +1717,23 @@ app.get(['/map', '/map/:userId'], (req, res) => {
         segments.forEach((segmentPoints, segmentIndex) => {
           const roadPoints = sampleRoadTrailPoints(segmentPoints);
           if (roadPoints.length < 2) return;
-          const routeCacheKey = roadRouteCacheKey(roadPoints, key + ':live:' + segmentIndex);
+          const distanceCacheKey = roadRouteCacheKey(roadPoints, key + ':live:' + segmentIndex);
+          const routeCacheKey = liveRouteCacheKey(roadPoints, key + ':live:' + segmentIndex);
           const cachedRoute = tripRouteCache.get(routeCacheKey);
           if (cachedRoute && cachedRoute.length > 1) {
-            rememberRoadDistance(routeCacheKey, cachedRoute);
+            rememberRoadDistance(distanceCacheKey, cachedRoute);
             rawSegmentLatLngs[segmentIndex] = cachedRoute;
-            historyLines.get(key).setLatLngs(rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs);
+            const nextLatLngs = rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs;
+            const casing = historyLineCasings.get(key);
+            if (casing) casing.setLatLngs(nextLatLngs);
+            const line = historyLines.get(key);
+            if (line) line.setLatLngs(nextLatLngs);
+            updateLiveRouteDebug(key, {
+              routeSource: 'road_matched',
+              matchedGeometryPoints: cachedRoute.length,
+              rawGpsPoints: segmentPoints.length,
+              lastMatchStatus: cachedRoute.roadMatchStatus || 'matched'
+            });
             return;
           }
           if (liveRouteInflight.has(routeCacheKey)) return;
@@ -1702,16 +1742,29 @@ app.get(['/map', '/map/:userId'], (req, res) => {
             .then((roadLatLngs) => {
               if (roadLatLngs.length > 1) {
                 tripRouteCache.set(routeCacheKey, roadLatLngs);
-                rememberRoadDistance(routeCacheKey, roadLatLngs);
+                rememberRoadDistance(distanceCacheKey, roadLatLngs);
                 rawSegmentLatLngs[segmentIndex] = roadLatLngs;
+                const nextLatLngs = rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs;
                 const casing = historyLineCasings.get(key);
-                if (casing) casing.setLatLngs(rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs);
+                if (casing) casing.setLatLngs(nextLatLngs);
                 const line = historyLines.get(key);
-                if (line) line.setLatLngs(rawSegmentLatLngs.length === 1 ? rawSegmentLatLngs[0] : rawSegmentLatLngs);
+                if (line) line.setLatLngs(nextLatLngs);
+                updateLiveRouteDebug(key, {
+                  routeSource: roadLatLngs.roadMatchStatus === 'matched' ? 'road_matched' : 'raw_gps',
+                  matchedGeometryPoints: roadLatLngs.length,
+                  rawGpsPoints: segmentPoints.length,
+                  lastMatchStatus: roadLatLngs.roadMatchStatus
+                });
               }
             })
             .catch(() => {
               // Keep filtered raw GPS path when road snapping fails.
+              updateLiveRouteDebug(key, {
+                routeSource: 'raw_gps',
+                matchedGeometryPoints: 0,
+                rawGpsPoints: segmentPoints.length,
+                lastMatchStatus: 'fallback'
+              });
             })
             .finally(() => {
               liveRouteInflight.delete(routeCacheKey);
@@ -1726,6 +1779,7 @@ app.get(['/map', '/map/:userId'], (req, res) => {
           historyLineCasings.delete(key);
           map.removeLayer(line);
           historyLines.delete(key);
+          liveRouteDebug.delete(key);
         }
       });
     }
